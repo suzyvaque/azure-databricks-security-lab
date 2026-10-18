@@ -1,0 +1,15 @@
+// Run only in the new PoC LAW after AuditEvent is enabled and data arrives.
+// Results contain sensitive identities and addresses: keep them in ignored local evidence.
+// Column names confirmed against real AZKVAuditLogs output on 2026-10-18.
+//
+// IMPORTANT: ResultType can read "Success" for a request that was DENIED. Always read HttpStatusCode,
+// ResultSignature (for example 403 / Forbidden) and ResultDescription (the denial reason).
+AZKVAuditLogs
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, OperationName, ResultType, ResultSignature, HttpStatusCode, ResultDescription,
+          CallerIpAddress, Identity, TrustedService, IsAddressAuthorized, IsRbacAuthorized,
+          ClientInfo, RequestUri, CorrelationId
+| order by TimeGenerated asc
+// Inspect all operations first, including failures and administrative calls.
+// TrustedService shows which trusted-service category the vault assigned to the caller (for example
+// AzureDatabricks). A caller address alone is not proof of the network path.
