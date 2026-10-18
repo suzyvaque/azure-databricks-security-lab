@@ -1,12 +1,12 @@
 # Phase 1 feasibility assessment
 
-> **Update 2026-10-18 — experimental result.** The prediction below was tested. Applying Managed Services CMK with the vault set to public access Disabled, bypass `None` and private-endpoint-only access failed: the control plane's `KeyGet` was rejected with 403 `ForbiddenByConnection`, from a public Azure address, with the vault classifying the caller as the trusted service `AzureDatabricks`. See [results](results.md). The classification is now **3** (not configurable under these settings), official support unconfirmed. The text below is the pre-experiment assessment, kept unchanged.
+> **Update 2026-10-18 — experimental result.** Applying Managed Services CMK with the vault at public access Disabled, bypass `None` and private-endpoint-only access failed: the control plane's `KeyGet` was rejected with 403 `ForbiddenByConnection` from a public Azure address. The approved NCC connection did not change that result. Changing only bypass to `AzureServices` succeeded. An Enforced NSP inbound rule also allowed CMK with bypass `None`; removing the rule then failed with 403 `ForbiddenByNsp`, and restoring it made the repeat succeed. The NSP success is still a public control-plane path, not customer Private Endpoint routing. See [results](results.md). **Overall feasibility remains inconclusive pending written vendor confirmation**; the exact tested private-endpoint-only configuration failed, but no explicit support statement or supported routing setup has been obtained.
 
 **Documentation re-check 2026-10-18.** Microsoft's Key Vault trusted-services page (updated 2026-08-20) lists **Azure Databricks** as a trusted service and states: "The bypass continues to apply when public access is disabled, so listed services don't require a private endpoint to connect", and that services *not* in the table "need a firewall IP rule, a virtual network rule, or a private endpoint". The Databricks managed-services CMK page (updated 2026-09-11) still takes only a vault URI, key name and pinned version, and its Key Vault setup contains no networking step. So the documented design is: the control plane reaches the vault **as a trusted service**, which requires bypass `AzureServices`. No customer private-endpoint route is documented, which is consistent with the experiment. The Key Vault Managed HSM variant has its own page that was not reviewed in detail.
 
 **Confirmed by experiment, same day.** Changing only the vault bypass to `AzureServices` (public access still Disabled) made the CMK deployment succeed, and the audit log shows the control plane's `KeyGet` and `KeyUnwrap` authorised as trusted service `AzureDatabricks` from a public Azure address. This matches the documented design above. It still is not a customer private-endpoint route. See [results](results.md).
 
-Research date: **2026-10-17**. Documentation findings only, not an Azure deployment certification. Subscription context and VM networking remain unverified.
+Initial research date: **2026-10-17**. The statements below that describe pre-deployment checks are historical snapshots; preflight, subscription context and VM networking were subsequently verified. This assessment is not a vendor support certification.
 
 ## Executive finding
 
@@ -14,9 +14,9 @@ Research date: **2026-10-17**. Documentation findings only, not an Azure deploym
 
 A Key Vault Private Endpoint is reachable by clients with routing/DNS to its VNet. It does not place the Databricks managed-services control plane in that VNet. Consequently, VM/cluster success calling Key Vault would validate a different source and cannot establish the requested CMK path.
 
-**Precise finding:** Managed Services CMK with `publicNetworkAccess=Disabled`, `networkAcls.bypass=None` and Private Endpoint-only access is **not documented or configurable through the reviewed public interfaces**. No affirmative official support statement was located. This is a documentation/configuration gap, not an observed runtime failure or an explicit vendor declaration of non-support. Seek written Microsoft/Databricks clarification before deployment for this objective.
+**Precise finding:** Managed Services CMK with `publicNetworkAccess=Disabled`, `networkAcls.bypass=None` and Private Endpoint-only access is **not documented or configurable through the reviewed public interfaces, and the tested update failed at the Key Vault network layer**. No affirmative official support statement was located. This is not an explicit vendor declaration of non-support, nor proof that no alternative supported configuration exists. Seek written Microsoft/Databricks clarification before relying on any route.
 
-**Current final-result category: 4 — Inconclusive.** A category 3 conclusion (Unsupported or not configurable) requires a confirmed support limitation or demonstrated inability to configure the required route; a category 1 or 2 conclusion requires runtime evidence. A possible fail-closed negative experiment must be separately approved and must not silently enable bypass.
+**Current final-result category: 4 — Inconclusive (supportability).** Runtime evidence now exists for the tested configurations: private-only and NCC with bypass `None` failed; `AzureServices` succeeded; Enforced NSP with one inbound rule succeeded, its rule-removed negative control failed with `ForbiddenByNsp`, and restoring the rule succeeded. These results do not prove a customer-private-endpoint route or official support. The classic Key Vault selected-networks/IP test remains blocked because policy forces public access Disabled. Keep the overall feasibility classification inconclusive until written support guidance clarifies whether the requested private-only route is supported/configurable.
 
 ## Scope boundaries
 
@@ -28,7 +28,7 @@ A Key Vault Private Endpoint is reachable by clients with routing/DNS to its VNe
 | Back-end/classic Private Link | Classic clusters → control-plane API/SCC relay | No; direction and caller differ |
 | Key Vault Private Link | Routed client → vault data plane through private NIC | Only for clients with an actual network/DNS path |
 | NCC private endpoints | Databricks serverless compute → customer resources | No documented applicability to managed-services key client; not in the original plan. **Now a user-requested test, see "NCC constraint" below** |
-| Key Vault trusted-services bypass | Selected service scenarios may bypass the firewall, still subject to identity authorization | Not a customer Private Endpoint path; forbidden by this experiment |
+| Key Vault trusted-services bypass | Selected service scenarios may bypass the firewall, still subject to identity authorization | Not a customer Private Endpoint path and therefore does not satisfy the requested private-only target; separately tested as the approved `AzureServices` control |
 | DBFS-root / managed-disk CMK | Other encryption surfaces | Different from Managed Services CMK; not substitutes |
 
 ## Documented details and constraints
@@ -53,13 +53,13 @@ A Key Vault Private Endpoint is reachable by clients with routing/DNS to its VNe
 
 | Requirement | Official evidence | Live subscription evidence | Gate |
 | --- | --- | --- | --- |
-| Azure Databricks in Korea Central | `koreacentral` appears in supported-regions list | Not obtained | Verify provider workspace locations and policies |
-| Premium + CMK + front/back-end/auth Private Link combination | Feature guides describe prerequisites; no KRC-specific combination guarantee established | Not obtained | Check provider/API/Private Link resources after creation; obtain support confirmation where metadata insufficient |
-| VNet/NSG/route/PE/Key Vault/Log Analytics | Azure services documented; no live regional eligibility checked | Not obtained | Check registered provider resource-type locations, SKU and policy constraints |
-| Classic node SKU and capacity | No node SKU selected | Not obtained | Inspect `az vm list-skus --location koreacentral --all`, restrictions and quota; no fallback |
+| Azure Databricks in Korea Central | `koreacentral` appears in supported-regions list | Provider listed Korea Central; target and auth workspaces deployed there successfully | Regional deployment verified; exact CMK route support still needs vendor response |
+| Premium + CMK + front/back-end/auth Private Link combination | Feature guides describe prerequisites; no KRC-specific combination guarantee established | Premium workspaces, PEs and CMK stages deployed; strict private-only route failed; NSP-based CMK passed functionally | Deployed combination observed; private-only CMK support remains unconfirmed |
+| VNet/NSG/route/PE/Key Vault/Log Analytics | Azure services documented; no live regional eligibility checked | Required PoC regional resources deployed successfully in Korea Central | Deployment verifies this PoC combination, not all quota or production limits |
+| Classic node SKU and capacity | No node SKU selected | Preflight found `Standard_D4s_v3` unrestricted and 8 regional vCPUs free; no classic cluster started | Classic-compute SKU/capacity and workload still require verification before cluster test |
 | Firewall/explicit egress, DNS resolver if needed | Architecture options documented | Not obtained | Approve exact SKU, routes, required destinations and budget |
-| Required provider registrations | Not inspected | Not obtained | Read-only check only; request approval before registration |
-| Existing VM peering/DNS compatibility | Azure supports global peering, explicit DNS links/forwarding | VM not identified | Verify nonoverlap, effective routes, DNS/zone conflicts and authorization |
+| Required provider registrations | Providers must be registered for deployed service types | Preflight found seven required providers registered | Satisfied for deployed resources; do not unregister shared providers |
+| Existing VM peering/DNS compatibility | Azure supports global peering, explicit DNS links/forwarding | VM and network inspected; approved direct peerings and DNS links created; private reachability verified | Basic connectivity verified; effective routes/NSGs not re-inspected after changes; cleanup is approval-gated |
 
 A provider location listing is a necessary check, not proof of SKU allocation, feature eligibility or capacity. No required feature may silently move to Korea South or any other region.
 
@@ -79,9 +79,13 @@ Added after the control experiment, before any NCC or IP-allowlist change. Sourc
 | Lifecycle | After attaching, wait about 10 minutes and restart serverless resources. Rule states: CREATING, PENDING (needs approval on the vault), ESTABLISHED, REJECTED, DISCONNECTED, EXPIRED (after 14 days in PENDING, REJECTED or DISCONNECTED), CREATE_FAILED |
 | Cost | Private endpoint rules "are billed by Azure for each hour they exist, regardless of connection state"; delete the rule when finished (Databricks may keep the endpoint on the resource for one day) |
 
-**What this means for the test.** A pass cannot be assumed and would be undocumented behavior. A failure is the expected result and would be consistent with the documentation. Even if an NCC rule reaches `ESTABLISHED`, it only shows a serverless path exists; it does not show that the control plane's key requests use it. The deciding evidence is the vault audit log with bypass `None`: either `KeyGet` and `KeyUnwrap` succeed with a changed `CallerIpAddress` and no `TrustedService` label, or the same 403 `ForbiddenByConnection` returns.
+**What this means for the test.** A pass cannot be assumed and would be undocumented behavior. A failure is the expected result and would be consistent with the documentation. Even if an NCC rule reaches `ESTABLISHED`, it only shows a serverless path exists; it does not show that the control plane's key requests use it. The deciding evidence is successful `KeyGet`/`KeyUnwrap` with bypass `None` plus route evidence; neither a changed `CallerIpAddress` nor absence of the `TrustedService` label is sufficient by itself.
 
 **Observed result of the NCC test (2026-10-18).** Failed: with an approved Databricks-created NCC connection on the vault and bypass `None`, the control plane's `KeyGet` was still denied with 403 `ForbiddenByConnection` from the same public address. See [results](results.md). **Correction:** the "no `TrustedService` label" criterion above is withdrawn; the label appeared on denied requests too.
+
+### NSP outcome and negative/repeat control (2026-10-18)
+
+The classic Key Vault selected-networks test could not be performed because a management-group modify policy kept `publicNetworkAccess` Disabled. The NSP association in Transition mode did not avoid that policy. With the vault association Enforced and one inbound rule for the observed control-plane address, CMK succeeded at bypass `None`. In CMK-NSP-03, removing only that rule caused a 403 `ForbiddenByNsp`; restoring it and applying another key version succeeded. This controlled A/B supports that the NSP rule admits the public control-plane request. Caveats: the phase-A vault audit row and NSP access-log correlation were unavailable, the NCC connection remained Approved as a confounder, and only one A/B cycle was performed. This is not a PE path, and vendor support remains unconfirmed. Full timestamps and final-state details are in [results](results.md).
 
 ### Reviewer proposal: allow the control plane NAT address on a selected-networks vault
 
@@ -98,7 +102,7 @@ A colleague proposed: if NCC does not work, use **Selected networks + Allow trus
 | Reason 2 (known IP sources for audit) | Reasonable as a governance argument: one named address is easier to explain than a service-wide exception, provided the address is monitored for change |
 | PE subnet inbound 443 for the control plane IP | Not planned. A private endpoint has a private address and the control plane was observed reaching the vault's **public** endpoint, so a rule on the endpoint subnet is not expected to change that path. To be clarified with the colleague, not tested unless asked |
 
-**Expected outcome (stated before testing):** with the address allowed and bypass `None`, the control plane's `KeyGet` and `KeyUnwrap` should succeed, with `IsAddressAuthorized=true` and no `TrustedService` label. If so, the classification becomes "functionally validated, official support unconfirmed" for a **selected-networks + IP allowlist** variant. It would still not be the requested private-endpoint-only result.
+**Expected outcome (stated before testing):** with the address allowed and bypass `None`, the control plane's `KeyGet` and `KeyUnwrap` should succeed, with `IsAddressAuthorized=true`; the `TrustedService` label is not a discriminator because it also appeared on denied requests. **This classic selected-networks outcome remains untested** because the policy prevented public access from being Enabled. The NSP variant is separately tested above and is not the same configuration. Neither would prove private-endpoint-only access.
 
 ## Support questions (blocking primary objective)
 

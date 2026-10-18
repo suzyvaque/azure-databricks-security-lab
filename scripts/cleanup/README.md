@@ -1,6 +1,6 @@
 # Cleanup design — not executable and not approved
 
-No resources were created by this session, so there is nothing to delete. Do not infer that the subscription contains no other resources. No cleanup has been run.
+PoC resources were created and remain deployed. **No cleanup has been run or approved.** Do not infer that the subscription contains no other resources. Current Azure state and cross-boundary artifacts are listed in [the inventory](../../docs/resource-inventory.md); cleanup requires separate explicit approval.
 
 ## Future approval-gated sequence
 

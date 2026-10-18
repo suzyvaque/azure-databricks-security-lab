@@ -13,17 +13,17 @@ After `-Stage Baseline` was run, a rerun must keep the Databricks network intent
 
 - [Approve-VaultConnection.ps1](Approve-VaultConnection.ps1) approves exactly one **named, currently Pending** private endpoint connection on the vault (for the NCC test). It refuses connections that belong to our own endpoints and prints the state before and after. See the [Stage 1 runbook](../../docs/deployment-plan.md#stage-1-runbook-ncc-test).
 
-The CMK stage is the experiment's decisive step. Failure is a valid result and must not be worked around with public access or the trusted-services bypass.
+The CMK stage is the experiment's decisive step. The trusted-services bypass `AzureServices` was used only for the separately approved control experiment; it is not the requested private-only posture. Do not enable it or public access as an unapproved workaround.
 
-Run state, CIDRs and a transcript go to ignored `.local/deploy`. VM peering/DNS beyond the vault endpoint is a separate approval-gated step not included here.
+Run state, CIDRs and a transcript go to ignored `.local/deploy`. VM peering/DNS beyond the vault endpoint were completed through the separately approved [Connect-VmPeering.ps1](Connect-VmPeering.ps1) workflow; review the [inventory](../../docs/resource-inventory.md) before reruns or cleanup.
 
 **Deviation from the earlier draft:** explicit egress uses a NAT gateway (cheap, **unfiltered** outbound), not a filtering firewall. Back-end Private Link does not make all dependency traffic private.
 
-## Original deployment gate
+## Original deployment gate (historical)
 
-**No executable deployment entry point or provisioning template is supplied in Phase 1.** This prevents a partial/unsupported design from being mistaken for an approved reproducible deployment.
+The initial Phase 1 design intentionally did not include a deployment entry point. The user later approved deployment; Bicep modules and executable scripts now exist and were run. This section retains the original authorization gates as a record, not as current deployment status.
 
-Follow-up: user authorization to create new resources has been received. Execution remains blocked by terminal failure and unmet mandatory preflight/support/design gates. Do not confuse authorization with validated readiness; no Azure write has been attempted.
+The preflight completed and Azure deployment succeeded. The private-only CMK support question remains unresolved. Do not confuse the completed experiment with vendor support or production readiness.
 
 The [draft plan](../../docs/deployment-plan.md) defines the future modules and order. Implement pinned Bicep/ARM modules and idempotent PowerShell orchestration only after:
 
@@ -34,6 +34,8 @@ The [draft plan](../../docs/deployment-plan.md) defines the future modules and o
 
 Future scripts must require explicit target subscription/RG confirmation from ignored local configuration, reject existing PoC RGs unless a verified run manifest establishes ownership, reject every region other than `koreacentral` for regional resources, check resource IDs/tags and stage dependencies, keep workspace/vault PNA disabled from creation, emit no credentials, and never run cleanup on failure without separate approval. Global DNS resources must use `global` where Azure requires it.
 
-Exact provisioning commands and tested templates are deferred, not claimed as delivered. Read-only commands already exist in the validation script. Do not run generic documentation examples that enable public network access.
+Provisioning templates and deployment commands are implemented in `infra/` and `Deploy-Poc.ps1` and were used for the PoC. The selected-networks setting script was also exercised but blocked by Azure Policy; do not treat generic examples that enable public network access as an approved workaround. Read-only validation commands are documented in the validation script reference.
 
 - [Set-VaultIpAllowlist.ps1](Set-VaultIpAllowlist.ps1) sets the vault to the Stage 2 posture (public network access Enabled for selected networks, default Deny, bypass None, exactly one allowed public address) or, with `-Restore`, back to the lab posture. It refuses private ranges and CIDRs wider than /24, prints the vault settings before and after, and stops if the intended posture is not reached. **In this subscription the Enabled setting cannot be reached because a management-group Azure Policy forces Key Vault public network access to Disabled**; the script then stops, by design, with the IP rule left in place until `-Restore` is run. `Deploy-Poc.ps1` also takes `-VaultPublicNetworkAccess` and `-VaultAllowedIps` (defaults: Disabled, none) so a redeploy does not reset the vault setting.
+
+- [Set-VaultPerimeter.ps1](Set-VaultPerimeter.ps1) manages the network security perimeter around the PoC vault for the NSP test: `-Action Setup` (perimeter, profile, vault and Log Analytics associations in Transition mode), `AddRule` (one inbound public address), `Enforce` (vault association only), `Transition`, `Status` and `Remove`. It prints the vault's network settings before and after, never prints addresses, and needs the Azure CLI `nsp` extension. Removing the association of a vault whose public network access is SecuredByPerimeter locks the vault down, so remove the perimeter only when you intend to.

@@ -16,17 +16,15 @@ A second read-only tool, [Get-VaultStatus.ps1](Get-VaultStatus.ps1), reports the
 - Output: timestamped **ignored** `.local/preflight` directory. It contains actual identifiers/network settings and is **not sanitized for publication**. Review local ACLs, disk encryption and retention. Do not paste raw output into public issues or docs.
 - GET failures, missing Graph rights or effective-route reads on a deallocated VM remain blocked checks. The script does not install tools, log in, select a subscription, register providers or start the VM.
 
-## Remaining manual read-only checks
+## Initial preflight checks (historical; completed unless noted)
 
-1. Confirm the account/subscription and VM identity locally with the owner; review effective permission data including RBAC/PIM/deny assignments and policies. Subscription GET permissions are not proof of resource-group creation, peering, RBAC or key-authoring permission.
-2. Compare provider `resourceTypes[].locations` to Korea Central; check required Premium/Private Link/CMK combination with support. There is no deployed target to query Private Link group IDs yet.
-3. Read existing DNS links/conditional forwarders and existing peer address ranges with narrowly scoped approved reads; the script intentionally does not enumerate every private DNS zone in the subscription. Inspect OS DNS cache/search/proxy configuration on the **actual** VM if relevant.
-4. Review nonoverlapping CIDRs for both new VNets, all VM VNet peers and connected networks; select no addresses until reviewed.
-5. Confirm selected classic VM SKU restrictions, family/total vCPU quota, storage and endpoint quotas, firewall/resolver SKUs, LAW availability and resource-provider policies in KRC. Fail closed on unavailable required features.
-6. Summarize only sanitized findings in documentation; keep raw evidence ignored.
+1. **Completed before deployment:** account/subscription, VM, provider registrations, permissions, policies, Korea Central availability/quota and VM network were inspected read-only; actual resource creation and approved peering later succeeded. Successful deployment does not confirm vendor support or untested classic-compute capacity.
+2. **Still open:** obtain Microsoft/Databricks confirmation for Managed Services CMK private-only or NSP support; verify the Databricks-managed RG locations and classic compute SKU/capacity before starting a cluster.
+3. Existing DNS/peer information was inspected before the approved changes. The VM was directly peered with both PoC VNets and linked to PoC private DNS. Reinspect current state only as needed for validation or separately approved cleanup; the script does not enumerate every subscription DNS zone.
+4. Exact allocated ranges and raw network details remain local-only; sanitized findings are documented in the inventory.
 
 ## Exact read-only command inventory
 
 The executable source contains argument arrays for `az version`, `az extension list`, `az account show`, `az cloud show`, `az account list-locations`, `az provider show`, `az vm list-skus --location koreacentral --all`, `az vm list-usage --location koreacentral`, `az network list-usages --location koreacentral`, `az policy assignment list`, `az ad sp show`, `az vm show`, `az network nic show`, `az network nic list-effective-nsg`, `az network nic show-effective-route-table`, `az network vnet show`, `az network nsg show`, `az network route-table show`, and `az rest --method get` for ARM permissions. No Azure write verbs are present.
 
-Future runtime validators will be separate scripts for configuration snapshots, DNS+TLS+authenticated APIs, cluster back-end tests, external public denials and Key Vault audit correlation. They do not exist yet; the [test plan](../../docs/test-plan.md) defines their acceptance criteria.
+Runtime coverage is partial: [Test-WorkspaceConnectivity.ps1](Test-WorkspaceConnectivity.ps1) verifies DNS, TCP, TLS and unauthenticated HTTPS reachability and was run from the VM. Authenticated API/browser login, cluster back-end tests and external public-denial tests remain unimplemented or unrun; the [test plan](../../docs/test-plan.md) defines their acceptance criteria.

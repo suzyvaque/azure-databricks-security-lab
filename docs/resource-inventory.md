@@ -1,6 +1,6 @@
 # Resource inventory
 
-**Baseline deployed and verified 2026-10-18.** Names use the `RUN` alias for the real run identifier. No subscription/tenant IDs, addresses or key versions are published; actual values are in ignored local storage.
+**Baseline and CMK-NSP-03 repeat verified 2026-10-18.** Current target workspace is `Succeeded` with Managed Services CMK applied. Names use the `RUN` alias for the real run identifier. No subscription/tenant IDs, addresses or key versions are published; actual values are in ignored local storage.
 
 ## Actual deployed inventory (verified in Azure)
 
@@ -13,7 +13,7 @@ All resources are in one new resource group in `koreacentral` unless noted. Vali
 | vnet-…-transit | VNet | koreacentral | /24; auth host/container (delegated, /27) and PE (/26) subnets | Configuration | In RG |
 | nsg-…-ws, nsg-…-auth | NSG | koreacentral | Three outbound rules required by the Databricks network intent policy (SQL 3306, Storage 443, EventHub 9093) | Configuration | In RG |
 | nat-…, pip-…-nat | NAT gateway, public IP | koreacentral | Outbound-only egress for the workspace subnets; unfiltered | Exists | In RG |
-| dbw-… | Databricks workspace | koreacentral | Premium; custom VNet; `enableNoPublicIp=true`; public access Disabled; `NoAzureDatabricksRules`; **provisioning state `Failed` after the NCC test (bypass `None`); it keeps its earlier managed-services key version (it had been `Succeeded` after the control experiment)** | Configuration; CMK applied | In RG; managed RG separate; **CMK cannot be disabled once enabled** |
+| dbw-… | Databricks workspace | koreacentral | Premium; custom VNet; `enableNoPublicIp=true`; public access Disabled; `NoAzureDatabricksRules`; final provisioning state **`Succeeded`** after CMK-NSP-03 phase B | Configuration; current CMK applied | In RG; managed RG separate; **CMK cannot be disabled once enabled** |
 | dbw-…-auth | Databricks workspace (auth only) | koreacentral | Same private-only settings; no compute | Configuration | In RG; managed RG separate |
 | pe-…-uiapi | Private endpoint | koreacentral | `databricks_ui_api`, Approved/Succeeded; front-end and back-end roles | Configuration | In RG |
 | pe-…-auth | Private endpoint | koreacentral | `browser_authentication`, Approved/Succeeded | Configuration | In RG |
@@ -22,10 +22,10 @@ All resources are in one new resource group in `koreacentral` unless noted. Vali
 | privatelink.azuredatabricks.net | Private DNS zone | global | Links: workspace VNet and transit VNet; 3 record sets | Configuration | In RG |
 | privatelink.vaultcore.azure.net | Private DNS zone | global | Links: workspace VNet and transit VNet | Configuration | In RG |
 | \<vault\>.privatelink.vaultcore.azure.net | Private DNS zone | global | One link: the **existing VM VNet**; one A record to the VM-side endpoint | Resolves privately from the VM | In RG; link affects existing VNet |
-| kv… | Key Vault | koreacentral | Standard; RBAC; public access Disabled; **bypass `None` (changed to `AzureServices` for the control experiment on 2026-10-18, restored the same day)**; default Deny; no IP rules; soft delete 7 days; purge protection | Configuration; private access from the VM; control-plane access as a trusted service | Soft-deleted vault remains after RG deletion |
+| kv… | Key Vault | koreacentral | Standard; RBAC; public access Disabled; bypass `None`; default Deny; no Key Vault IP rules; soft delete 7 days; purge protection | Configuration; private access from the VM; control-plane CMK request admitted by Enforced NSP rule, not by a customer PE | Soft-deleted vault remains after RG deletion |
 | cmk-managed-services | Key | koreacentral (vault child) | RSA 2048 software key, enabled; created over the private endpoint | Enabled | With vault |
 | law-… | Log Analytics workspace | koreacentral | PerGB2018, 30-day retention | Exists | In RG |
-| audit-to-law | Diagnostic setting | Vault child | AuditEvent to the new workspace | Created; no log query run yet | With vault |
+| audit-to-law | Diagnostic setting | Vault child | AuditEvent to the new workspace | Created; queried for CMK audit events across the experiments | With vault |
 | Role assignment (AzureDatabricks app) | RBAC | Vault scope | Key Vault Crypto Service Encryption User on the vault; the principal is the tenant's AzureDatabricks service principal | Read back 2026-10-18: present, correct principal and scope | Scope-bound |
 | Role assignment (signed-in user) | RBAC | Vault scope | Key Vault Crypto Officer, created for key authoring | Used successfully | Remove after the experiment |
 | adb-koreacentral-dp-to-cp-pl-… (four) | Network intent policies | koreacentral | Created by Databricks in the RG; require the NSG rules above | Exists | Provider-managed |
@@ -34,6 +34,11 @@ All resources are in one new resource group in `koreacentral` unless noted. Vali
 | peer-to-vm-ws, peer-to-vm-transit | VNet peering (new side) | PoC RG | Connected; vnet access on; forwarded traffic off; no gateway transit | Connected | In RG |
 | peer-dbxcmk-RUN-to-ws, peer-dbxcmk-RUN-to-transit | VNet peering (**existing VM VNet side**) | **Existing VM resource group** | Connected; vnet access on; forwarded traffic off; no gateway transit | Connected | **Must be deleted explicitly**; not removed by deleting the PoC RG |
 | link-vm (on privatelink.azuredatabricks.net) | Private DNS zone link | PoC RG | Links the new zone to the **existing VM VNet** | VM resolves workspace privately | In RG; affects the existing VNet |
+| nsp-… | Network security perimeter | koreacentral | Profile `profile-poc`; vault association Enforced; one inbound address rule restored after CMK-NSP-03 phase A; Log Analytics association Learning/Transition mode | Final read-back: vault association Enforced, one rule; CMK-NSP-03 A denied with `ForbiddenByNsp`, B succeeded | In RG; **retain pending owner decision**; removal requires an approved sequence. If the vault is `SecuredByPerimeter` when its association is removed it is locked down |
+| assoc-vault | Perimeter resource association | PoC RG | Key Vault, **Enforced** mode | Succeeded, no provisioning issues | With the perimeter |
+| assoc-law | Perimeter resource association | PoC RG | Log Analytics workspace, Transition mode | Succeeded | With the perimeter |
+| allow-databricks-cp | Perimeter inbound access rule | PoC RG | One public IPv4 address (/32), the control-plane address seen in the audit log; actual address stays in local evidence | Present in final state; removal caused `ForbiddenByNsp`, restoration was followed by successful CMK | With the perimeter; retain pending owner decision |
+| nsp-to-law | Diagnostic setting on the perimeter | Perimeter child | All perimeter logs to the PoC Log Analytics workspace | Created; no log rows when read | With the perimeter |
 
 ### Deviations from the original plan
 

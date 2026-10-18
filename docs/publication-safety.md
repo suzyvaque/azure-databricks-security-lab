@@ -1,6 +1,6 @@
 # Public-repository safety and local milestone workflow
 
-**No push is authorized. No push attempted.** Local commits are requested at meaningful milestones but cannot be made yet because terminal command execution is not established. Do not fabricate commit IDs or treat editor saves as commits.
+**No push is authorized or attempted. No local commit has been made.** Terminal execution was available for the deployment and experiments, but no Git status/history review or secret scan has been completed. Do not fabricate commit IDs or treat editor saves as commits.
 
 ## Disclosure policy
 
@@ -30,9 +30,9 @@ Publish only generic infrastructure code, sanitized templates and English learni
 
 | Check | Actual state |
 | --- | --- |
-| New authored content reviewed for disclosure | Reviewed via authored content/partial editor Git diff; limited editor pattern search found no matches; no actual Azure metadata collected; not a full secret scan |
+| New authored content reviewed for disclosure | Reviewed via authored content/partial editor Git diff and limited disclosure-pattern search; raw Azure metadata is retained only in ignored local evidence and sanitized in public docs; not a full secret scan |
 | Workspace editor diagnostics | Final recheck reports no errors after Markdown formatting fixes; PowerShell runtime execution and external lint not performed |
-| Secret scanner execution | Blocked: terminal does not execute commands |
-| Git tracked-file/history/staged review | Blocked: no Git command results |
-| Local milestone commit | Blocked: no command execution; no commit claimed |
+| Secret scanner execution | Not run; no scan result claimed |
+| Git tracked-file/history/staged review | Not run; repository status/history not yet verified |
+| Local milestone commit | Not made; awaiting review and explicit milestone decision |
 | Public publication | Not approved; not attempted |

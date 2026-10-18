@@ -2,11 +2,14 @@
 
 ## Current outcome
 
-**Three runs, to be read together.**
+**Six CMK attempts, to be read together.**
 
-1. **The requested configuration (public access Disabled, trusted-services bypass `None`, private endpoint only): 3 — Unsupported or not configurable, as observed in one experiment. Official support is unconfirmed.**
+1. **The requested configuration (public access Disabled, trusted-services bypass `None`, private endpoint only): failed in the tested attempt with 403 `ForbiddenByConnection`.** This is a runtime result for this setup, not a vendor-confirmed unsupported classification; the supported route remains unconfirmed.
 2. **The documented trusted-service configuration (public access Disabled, bypass `AzureServices`): functionally validated.** The only change was the vault's bypass, and the same CMK deployment then succeeded.
 3. **Bypass `None` with a Databricks NCC private endpoint rule to the vault (Approved on the vault): failed in the same way as run 1** (403 `ForbiddenByConnection`, same caller address). NCC did not change the control plane's path. See the NCC section below.
+4. **Bypass `None`, vault inside an Enforced network security perimeter with one inbound address rule: succeeded.** The workspace update succeeded; the control plane's `KeyGet` and `KeyUnwrap` returned 200 with `IsRbacAuthorized=true`. The caller was the same public address, which is the address the perimeter rule allows. Not a private endpoint path. See the NSP section below.
+5. **CMK-NSP-03 phase A: the perimeter rule was removed, with the vault association still Enforced; the CMK update failed with `ForbiddenByNsp`.**
+6. **CMK-NSP-03 phase B: the rule was restored and another new key version applied; the update succeeded.** Current workspace state is `Succeeded` with CMK configured.
 
 With the vault set to public access Disabled, trusted-services bypass `None` and private-endpoint-only access, applying Managed Services CMK to the workspace **failed**. The Databricks control plane's first request to the vault (a `KeyGet`) was rejected with HTTP 403 `ForbiddenByConnection`. The vault audit log records the caller as the AzureDatabricks application, classified by the vault as the trusted service `AzureDatabricks`, calling from a **public Azure address**, not through any customer private endpoint. No `KeyWrap` or `KeyUnwrap` was attempted because `KeyGet` failed first.
 
@@ -56,15 +59,18 @@ Everything in the first group of rows was identical in both runs; only the bypas
 
 **Interpretation.** With an approved NCC connection present, the control plane's key request still arrived from the same public address and was denied at the network layer. So NCC did not carry the Managed Services CMK request. This agrees with Microsoft documenting NCC for serverless compute only. **Limits:** one attempt; NCC rule status and workspace attachment not read by us; the NCC connection may need time or a serverless restart to take effect (Microsoft says up to 10 minutes, and restart serverless resources), and we waited only for the attachment steps the admin reported; a different account configuration is not excluded. The result supports "NCC does not change this path in this setup", not "NCC can never apply".
 
-#### Summary of the three runs
+#### Summary of the CMK runs
 
 | Run | Vault bypass | Other vault settings | NCC rule | Control-plane `KeyGet` | `IsRbacAuthorized` | Workspace result |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 (05:44 UTC) | `None` | Public Disabled, Deny, no IP rules | No | 403 `Forbidden` | empty | Update failed; workspace `Failed` |
 | 2 (06:50 UTC) | `AzureServices` | Same | No | 200 `OK` (x3), then `KeyUnwrap` 200 | `true` | Update succeeded; `Succeeded`; key applied |
 | 3 (08:48 UTC) | `None` | Same | Yes (connection Approved on the vault) | 403 `Forbidden` | empty | Update failed; workspace `Failed`, earlier key version retained |
+| 4 (09:51 UTC) | `None` | Vault property still public Disabled, Deny, no vault IP rules; **vault association in an Enforced network security perimeter with one inbound address rule** | Yes (connection still Approved) | 200 `OK` (`KeyGet`), then `KeyUnwrap` 200 | `true` | Update succeeded; workspace `Succeeded`; new key version applied |
+| 5 / CMK-NSP-03 A (10:06:56–10:09:52 UTC) | `None` | Same as run 4 **except the perimeter inbound rule was removed**; vault association remained Enforced | Yes (connection still Approved) | Deployment error: wrapped 403, inner code **`ForbiddenByNsp`**; matching vault audit row was not available when queried | not available | Update failed; workspace temporarily `Failed`; prior CMK version retained |
+| 6 / CMK-NSP-03 B (10:29:24–10:46:19 UTC) | `None` | Same as run 4, with the inbound perimeter rule restored; vault PNA Disabled, default Deny, no vault IP rules | Yes (connection still Approved) | `KeyGet` 200 (x3) and `KeyUnwrap` 200 in the follow-up audit query | `true` | Update succeeded; workspace `Succeeded` with the new CMK version |
 
-So your reading is right: **bypass off failed, bypass on succeeded, bypass off with an approved NCC connection failed.** In all three runs the caller was the same public address and the vault labelled it `TrustedService=AzureDatabricks`. That label appears even on the denied requests, so it shows how the vault classifies the caller, not that the request was admitted.
+The first three establish: **bypass off failed, bypass on succeeded, and bypass off with an approved NCC connection failed.** Run 4 adds that **bypass off with an Enforced perimeter and one inbound address rule succeeded**. CMK-NSP-03 strengthens the attribution: **removing that rule failed with `ForbiddenByNsp`; restoring it and applying a different new key version succeeded**. The final workspace state is `Succeeded`. The caller remained a public address and the vault labelled it `TrustedService=AzureDatabricks`; that label describes caller classification, not admission or route.
 
 **Correction to an earlier statement.** Earlier plan text said a pass would show "no `TrustedService` label". That was wrong: the label was present on both denied runs. The real discriminators are the HTTP status and `IsRbacAuthorized` / `IsAddressAuthorized`.
 
@@ -85,11 +91,59 @@ So your reading is right: **bypass off failed, bypass on succeeded, bypass off w
 
 - On this subscription the vault's public network access cannot be set to `Enabled` by us, so the "selected networks plus IP allowlist" design **cannot be tested here as written**. The vault firewall's IP rules apply only while public network access is not `Disabled`, so the one IP rule that exists does nothing now.
 - This is a finding about the environment, not about Databricks. It is also evidence that the organisation enforces private-only Key Vault access, so any design that depends on public access Enabled would fail the same governance control.
-- The `modify` policy excludes resources configured with a network security perimeter (NSP), per its display name. Whether an NSP-based design is permitted and supported for Managed Services CMK has not been checked; Microsoft documents that an NSP overrides the trusted-services bypass, so it is not expected to help.
+- The `modify` policy excludes resources configured with a network security perimeter (NSP), per its display name. **Correction (2026-10-18):** this entry originally said an NSP "is not expected to help". That was wrong: the NSP test below succeeded. The reasoning had been that an NSP overrides the trusted-services bypass, which is true, but it ignored that a perimeter inbound rule can admit the control plane's address itself.
 
 **Not done, on purpose.** No policy exemption, assignment edit, remediation or other change to organisational governance was attempted. Those are outside the approved scope and belong to the policy owner.
 
 **Rollback.** The vault was restored with `Set-VaultIpAllowlist.ps1 -Restore` (public Disabled, default Deny, bypass `None`, IP rules removed). See the journal for the verified state.
+
+#### NSP test (2026-10-18): tests CMK-NSP-01 and CMK-NSP-02
+
+**Why NSP.** The policy that blocked Stage 2 excludes Key Vaults configured with a network security perimeter. The user asked to try NSP first, then the selected-networks test. Microsoft's documentation and the pre-stated expectations are in the [deployment plan](deployment-plan.md).
+
+**Setup (all in the PoC resource group).** A perimeter, one profile, and two associations in Transition (log-only) mode: the Key Vault, and the Log Analytics workspace (so audit queries from this VM keep working). One diagnostic setting on the perimeter sends its logs to that workspace.
+
+**CMK-NSP-01: Transition association, then public network access Enabled. Not reached.** After the association, the Enabled write was retried with the same script. It again reported success while the vault stayed `Disabled`. A Transition-mode association does not stop the management-group policy from rewriting the value. So the selected-networks test as originally defined (a classic vault firewall IP rule) **stays untestable** in this subscription. The IP rule was removed again.
+
+**CMK-NSP-02: Enforced association with one inbound access rule. Passed (functional).**
+
+1. One inbound perimeter access rule for the single control plane address (a /32, the address seen in our audit log) was added.
+2. Only the vault's association was switched to **Enforced**. The workspace association stayed Transition. Read back: association Enforced, provisioning succeeded, no provisioning issues.
+3. The vault's own properties stayed public `Disabled`, bypass `None`, default Deny, no IP rules (re-read 09:52 UTC).
+4. The same CMK stage was run with `-VaultBypass None` and the same new key version as the failed NCC run (test start 09:36 UTC).
+5. The workspace passed through `Accepted` and then `Succeeded` with the new key version applied. The CMK stage reported completion.
+6. Vault audit log, 09:51 UTC: after the usual 401 authentication challenges, `KeyGet` 200 and `KeyUnwrap` 200, `IsRbacAuthorized=true`, `TrustedService=AzureDatabricks`, caller the same public address as in runs 1 to 3, same Java key vault SDK client on Linux.
+
+**What this shows.** With the vault at bypass `None`, the control plane's key requests were admitted once the vault sat in an Enforced perimeter with an inbound rule for the control plane's address. That is the closest working equivalent of "selected networks with only the control plane address approved while trusted services bypass is disabled", implemented with a perimeter instead of the vault firewall.
+
+**What this does not show.**
+
+- **Not a private endpoint path.** The caller is still a public address, admitted by an IP rule.
+- **Attribution is by elimination, not by a log.** The perimeter access log table exists but had no entries when read. It was enabled shortly before the request and may lag, so "no entry" is not evidence either way. The vault audit's network-ACL column was not read. The conclusion rests on the perimeter rule being the only functional change since the failed NCC run (run 3), with the same key version and the same bypass.
+- **Confounder.** The NCC connection from run 3 was still Approved on the vault. NCC alone failed (run 3), so it is unlikely to be the cause, but it was not removed for this test.
+- **Initial attempt followed by a negative control and repeat.** CMK-NSP-03 phase A removed only the perimeter inbound rule and failed with `ForbiddenByNsp`; phase B restored the rule and succeeded (details below).
+- **Address stability.** Microsoft warns that control plane addresses change; this is evidence for that address at that time.
+- **Support.** Microsoft does not document Managed Services CMK with a perimeter. Official support is unconfirmed.
+
+**Documented behavior that fits.** In Enforced mode the perimeter rules override the vault's `publicNetworkAccess` setting, trusted-services bypass is overridden for a perimeter-secured vault, and private endpoint traffic is exempt from perimeter rules (so the VM's private path is unaffected).
+
+**Current state and risk.** The vault is inside the Enforced perimeter with the inbound rule, and is reachable from one shared Databricks control-plane address. RBAC remains the identity boundary. Phase A confirmed that removing the rule blocks a new CMK update; the interval before any cached-key impact is still undocumented.
+
+#### Negative control and repeat (CMK-NSP-03)
+
+The design and expectations were written in the [deployment plan](deployment-plan.md) **before** running.
+
+**Phase A: remove only the inbound rule. Result: failed, as expected.**
+
+1. The inbound rule was deleted; the perimeter, profile, Enforced vault association and every vault setting were unchanged (status read-back: associations unchanged, no rule).
+2. After a pause, a new key version was created over the VM's private endpoint (the vault name resolved to a private address; creating the key worked, confirming private endpoint traffic is exempt from the perimeter).
+3. `Deploy-Poc.ps1 -Stage Cmk -VaultBypass None` was run with that new version (start 10:06:56 UTC).
+4. The workspace went to `Updating` and then `Failed` and kept the earlier key version `...ecab51`.
+5. **The platform error names the perimeter.** The wrapped vault message reads: "Connection is not an approved private link, the request was blocked by NSP rules and PublicNetworkAccess is set to 'Disabled'", with the caller identified as the AzureDatabricks application, and inner code **`ForbiddenByNsp`**. The earlier failures (runs 1 and 3) carried the different inner code `ForbiddenByConnection` and a message about the bypass.
+
+**What this supports.** With the same vault and bypass posture, removing the only inbound perimeter rule produced a `ForbiddenByNsp` denial; restoring it, then applying a different new key version, succeeded. This is a controlled negative/repeat pair supporting the perimeter rule as the admission condition. **Limits:** the matching vault audit row for phase A was not available when queried, so there are no audit authorization columns for that denial; the NCC connection remained Approved throughout (it failed to admit the request in run 3); the perimeter access-log table had no rows when checked. It is strong controlled evidence, not an NSP-log-level correlation or vendor confirmation.
+
+**Phase B: restore the rule, new key version, apply. Result: succeeded.** The inbound rule was restored and read back; a separate new key version was created through the VM's private endpoint. The CMK deployment ran from 10:29:24 to 10:46:19 UTC and completed. Final read-back at about 10:54 UTC showed the workspace `Succeeded` with CMK configured. The audit query returned three `KeyGet` and one `KeyUnwrap` operations, all HTTP 200, `IsRbacAuthorized=true`, `TrustedService=AzureDatabricks`, from the same public control-plane caller. The NCC connection remained Approved. This restores service after phase A and reproduces the functional success with the perimeter rule present.
 
 #### Details
 
@@ -103,9 +157,9 @@ So your reading is right: **bypass off failed, bypass on succeeded, bypass off w
 
 **Confounder, disclosed.** Between the two attempts the target workspace was recovered from `Failed` by redeploying the Baseline stage, and the CMK stage was re-run. The vault change is the only change to the vault, and the failure message named the bypass setting, but this is one before/after pair, not a repeated trial.
 
-**Consequence for the lab.** The vault is now at bypass `AzureServices`, which deviates from the requested posture. Public access is still Disabled. Managed Services CMK cannot be disabled once enabled, and the workspace now depends on this vault. Restoring `None` is expected to make the control plane's key requests fail again once its cached key expires (the cache interval is not documented). Decision pending.
+**Historical consequence after the control experiment.** At that point the vault was temporarily at bypass `AzureServices`, which deviated from the requested posture. It was later restored to `None` for the NCC and NSP experiments. **Current posture:** public access Disabled, bypass `None`, Enforced NSP association with one inbound rule; the target workspace is `Succeeded` with CMK. The NSP rule-removal negative control failed with `ForbiddenByNsp`; the effect of cached-key expiry remains undocumented. The key cannot be disabled from the workspace once Managed Services CMK is enabled.
 
-**Consequence:** the workspace was left in provisioning state `Failed` with no encryption configuration after the first attempt. Nothing was enabled to work around the failure at that point, and the vault settings were re-read afterwards and were unchanged. The control experiment below was run later, on explicit instruction.
+**Historical consequence:** the first strict attempt left the workspace in provisioning state `Failed` without encryption configuration. The later control experiment and NSP repeat each succeeded; current state is `Succeeded` with CMK. Do not mistake the earlier failure state for current status.
 
 All test preconditions/procedures/expected results are defined in the [test plan](test-plan.md). The register below records **actual results only**. Inconclusive means untested or insufficient evidence, not failed infrastructure. "Pass (configuration)" means the Azure resource properties were read and match; it does not mean traffic was tested.
 
@@ -122,7 +176,7 @@ All test preconditions/procedures/expected results are defined in the [test plan
 | PUB-KV-01 — vault public denial | Vault private-only | See observation O-1 | Network-specific denial from a public network | Before any PE existed, ARM key creation was refused with `ForbiddenByConnection` | Inconclusive | O-1 is a Microsoft first-party service, not an external client; no external vantage tested |
 | KV-BYPASS-01 — bypass None | Vault deployed with strict flags | Read vault properties | Strict flags retained | Public Disabled, bypass None, default Deny, 0 IP rules during the first CMK attempt. **Changed to bypass `AzureServices` for the control experiment, then restored to `None` (confirmed by the script's before/after log and a later vault read)** | Pass for the first attempt; requirement met again after the restore | Restore was done to test an NCC path; the workspace keeps working on a cached key until the cache expires |
 | CMK-CONFIG-01 — managed-services CMK | Key exists and is enabled; vault private-only (public Disabled, bypass None, default Deny); AzureDatabricks app granted Crypto Service Encryption User on the vault | `Deploy-Poc.ps1 -Stage Cmk -KeyVersion <version>`, a workspace update with the key URI, name and pinned version | Successful exact managedServices update | **Failed.** Workspace `PERMISSION_DENIED`: Databricks could not use the key; the wrapped vault error is 403 `ForbiddenByConnection` (not an approved private link; bypass is not `AzureServices`; public access Disabled). Workspace left in `Failed` with no encryption block | **Fail** | Databricks reports this as a missing-permission error, but the vault's own message and the audit record point to the network policy. See CMK-RBAC-01 for what is and is not proven about RBAC. Evidence: deploy output and workspace state kept locally |
-| CMK-OPS-01 — key operations | Same | Queried vault audit logs after the failure | Real service-principal Get/Wrap/Unwrap | One `KeyGet` by the AzureDatabricks application, HTTP 403 / `Forbidden`; no `KeyWrap`/`KeyUnwrap` | Fail (denied) | The audit `ResultType` column says `Success` for this denied request; trust `HttpStatusCode` and `ResultSignature`, not `ResultType` |
+| CMK-OPS-01 — key operations | Same | Queried vault audit logs after the initial failure | Real service-principal Get/Wrap/Unwrap in this attempt | One `KeyGet` by the AzureDatabricks application, HTTP 403 / `Forbidden`; no `KeyWrap`/`KeyUnwrap` in this failed attempt | Fail (denied) | The audit `ResultType` column says `Success` for this denied request; trust `HttpStatusCode` and `ResultSignature`, not `ResultType`. Later successful operations are captured in CMK-OPS-02 and CMK-NSP-03 |
 | CMK-RBAC-01 — was the 403 a permission problem? | Vault in RBAC mode (access policies not in use) | Read role assignments on the vault, the AzureDatabricks service principal, the workspace identities and the audit authorization fields | The AzureDatabricks principal holds the documented role at the vault; the denial is not an RBAC denial | See the evidence list below | **Pass** | The first denial happened before RBAC was evaluated. The control experiment later settled it: with the network layer open, RBAC passed (`IsRbacAuthorized=true`) |
 | CMK-CONFIG-02 — control experiment, bypass `AzureServices` | Same vault, only bypass changed (public Disabled, default Deny, 0 IP rules) | `Deploy-Poc.ps1 -Stage Cmk -KeyVersion <version> -VaultBypass AzureServices` | Successful managedServices update | Deployment completed; target workspace `Succeeded`; encryption block present with the vault URI, key name and pinned version | **Pass (functional)** | Matches the documented trusted-service design; not a private-endpoint path |
 | CMK-OPS-02 — key operations, control experiment | Same | Queried vault audit logs for non-CLI callers | Real control-plane Get/Wrap/Unwrap | Three `KeyGet` and one `KeyUnwrap`, all HTTP 200, `IsRbacAuthorized=true`, `TrustedService=AzureDatabricks`; no `KeyWrap` seen in the window | **Pass (Get/Unwrap); Wrap not observed** | Window is short; caching means later operations may not hit the vault. Raw logs kept locally |
@@ -131,6 +185,8 @@ All test preconditions/procedures/expected results are defined in the [test plan
 | CMK-IP-01 — selected networks with the control plane address allowed, bypass `None` | Approved by the user; vault posture could not be reached | `Set-VaultIpAllowlist.ps1`, CLI update, resource update and Bicep module deployment | Control plane admitted by IP rule, `IsAddressAuthorized=true` | Public network access stayed `Disabled` on all paths because a management-group `modify` policy rewrites it | **Blocked (not tested)** | Environment constraint. The CMK was not re-applied because the vault could not reach the intended posture. See the Stage 2 section |
 | CMK-PATH-01 — CMK private path | Same | Read the audit record fields | Control-plane operation attributable to the intended PE | The caller arrived from a **public Azure address**, classified `TrustedService=AzureDatabricks`, using a Java SDK client on Linux (the control plane). The address is inside Microsoft's published `AzureDatabricks` service tag range (checked against the service tag data for Korea Central, change number 234; it is also inside an `AzureCloud` block registered to East US 2, which alone is address registration. Microsoft's published control plane address list names this address under the **East US 2** Control Plane NAT, not under Korea Central, so this Korea Central workspace's key request appears to have come through the East US 2 control plane NAT. Caveat: Microsoft says the NAT values apply when secure cluster connectivity is disabled, and this workspace has it enabled, so matching the table is an observation, not a documented guarantee). The audit log itself carries no such tag, only `CallerIpAddress`. It did not use the customer private endpoints | Fail (no private path) | Consistent with the documented trusted-service model. One observation; vendor confirmation pending |
 | NEG-ID-01 — identity denial | No disposable key/test identity | Not run | Identity-specific rejection | None | Inconclusive | No grants changed |
+| CMK-NSP-01 — vault in a perimeter (Transition), then public Enabled with one IP rule, bypass `None` | Perimeter, profile and two Transition associations created; user-approved | Retried `Set-VaultIpAllowlist.ps1` after the association | Enabled sticks, so the vault IP rule can be tested | Reported success; vault stayed `Disabled`; the policy rewrote the value | **Not reached** | Transition mode does not escape the management-group `modify` policy. The classic selected-networks test remains untestable here |
+| CMK-NSP-02 — vault association Enforced with one inbound address rule, bypass `None` | Vault property public Disabled, bypass `None`, no vault IP rules; one perimeter inbound rule; workspace association Transition; same new key version as the failed NCC run | `Deploy-Poc.ps1 -Stage Cmk -KeyVersion <new> -VaultBypass None`, then audit | Control plane admitted by the perimeter rule | Workspace `Succeeded` with the new key version; `KeyGet` 200 and `KeyUnwrap` 200, `IsRbacAuthorized=true`, same public caller address | **Pass (functional)** | Not a private endpoint path. CMK-NSP-03 later strengthens attribution: removing the rule failed with `ForbiddenByNsp`, restoring it succeeded. NSP access-log table remained empty; NCC connection remained present; vendor support unconfirmed. See the NSP section |
 | NEG-NET-01 — network denial | No disposable path | Not run | Network-specific rejection without widening rules | None | Inconclusive | No firewall changed |
 | NEG-CMK-01 — cached CMK enforcement | No disposable CMK workspace; no downtime approval | Not run | Cache-aware denial and recovery | None | Inconclusive | No key disabled/revoked |
 | CLEAN-01 — complete cleanup | Resources now exist; no cleanup approval | Not run | Owned artifacts absent and original infra intact | Not run | Inconclusive | No deletion attempted |
@@ -153,10 +209,10 @@ All test preconditions/procedures/expected results are defined in the [test plan
 ## Supported documentation versus observation
 
 - **Documented:** Databricks supports VNet Injection, Premium Private Link/SCC and Managed Services CMK; Korea Central is a listed region. Key Vault supports private endpoints and public-access restriction; bypass must be None to exclude trusted-service exemption.
-- **Not established:** subscription/KRC feature-combination availability, exact supported control-plane CMK PE route, successful private-only CMK configuration, runtime public denials or private connectivity.
-- **Observed in Azure:** the Baseline deployment succeeded; both workspaces are Premium, private-only, with Approved endpoint connections; the vault is locked to private-only access with bypass None; the VM resolves the vault privately and created and listed the key over the endpoint; ARM key creation was refused before any endpoint existed (O-1).
-- **Observed locally:** the assistant terminal returned unreliable output throughout; results were gathered through detached scripts writing to files. Raw evidence stays in ignored local storage.
-- **CMK operation logs:** the vault audit log holds one denied `KeyGet` by the AzureDatabricks application and no `KeyWrap` or `KeyUnwrap`. Raw logs stay in ignored local storage; this document carries sanitized summaries only.
+- **Not established:** exact supported control-plane CMK PE route, successful private-endpoint-only CMK configuration, authenticated API/browser access, classic-cluster back-end path, or runtime public denial from an external network. Vendor supportability of the NSP configuration remains unconfirmed.
+- **Observed in Azure:** the Baseline deployment succeeded in Korea Central; both workspaces are Premium with private workspace endpoints; the vault is public Disabled/bypass None and now associated with an Enforced NSP rule; the VM resolves the vault privately and created/listed the key over the endpoint; control-plane CMK succeeded with the NSP rule present and failed when it was removed; ARM key creation was refused before a PE existed (O-1).
+- **Observed locally:** the initial terminal issue was resolved; deployment and validation evidence was collected by scripts and retained locally. Raw evidence stays in ignored local storage.
+- **CMK operation logs:** the audit record contains both denied requests (`KeyGet` 403 with `ForbiddenByConnection` or `ForbiddenByNsp`) and successful requests (`KeyGet`/`KeyUnwrap` 200, RBAC authorized) from separate attempts. Raw logs stay in ignored local storage; this document carries sanitized summaries only.
 
 ## Per-test execution record template
 

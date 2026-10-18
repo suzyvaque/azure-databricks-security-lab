@@ -1,6 +1,8 @@
 # Deployment walkthrough and actual execution record
 
-## Actual chronology — no Azure deployment yet
+## Initial Phase 1 chronology (historical)
+
+The entries in this table predate Azure deployment and describe the initial read-only phase. They are retained as history; the actual deployment record and latest state follow.
 
 | Step | What / why | How | Actual values / dependencies | Verification / outcome |
 | --- | --- | --- | --- | --- |
@@ -27,6 +29,9 @@ These are the Phase 1 steps. The actual deployment record follows the table belo
 | D7 | Private path for this VM to the vault (requested by the user) | `infra/modules/vmaccess.bicep` | Endpoint in the VM's existing subnet; a vault-specific private DNS zone linked only to the VM's VNet, so no peering and no multi-IP DNS | D3 | Endpoint Approved; vault name resolves to a private address from the VM |
 | D8 | Create the CMK key over the private path | `scripts/deploy/New-CmkKey.ps1` | Requires a private DNS answer first; grants Key Vault Crypto Officer on this vault only; creates an RSA 2048 software key | D7; RBAC propagation | Key created and enabled; version saved to ignored local state |
 | D9 | Verify vault state | `scripts/validate/Get-VaultStatus.ps1` | Reads network flags, endpoint states, DNS privacy from the VM, key enablement | D8 | Public Disabled, bypass None, both endpoints Approved, DNS private, key enabled |
+| D10 | Peer the existing VM VNet with both new VNets and link the Databricks private DNS zone | `scripts/deploy/Connect-VmPeering.ps1` | Two direct peering pairs; no gateway transit or forwarded traffic; no VM/NIC/NSG/route edits | Explicit user approval | Four peering resources Connected; private DNS zone link created |
+| D11 | Validate VM private reachability | `scripts/validate/Test-WorkspaceConnectivity.ps1` | Workspace and browser-auth hostnames; DNS, TCP, TLS and HTTPS checks | D10 | Both resolve/connect privately; TLS validates; HTTPS returns 303 to sign-in. Authenticated API and actual browser login not tested |
+| D12 | Run Managed Services CMK and network-policy experiments | `scripts/deploy/Deploy-Poc.ps1 -Stage Cmk`, audit queries, bypass/IP/NSP scripts | Bypass comparison, NCC attempt, policy-blocked selected-networks attempt, Enforced NSP and CMK-NSP-03 A/B; details in [results](results.md) | Key created through VM PE; correct AzureDatabricks crypto role; user approvals recorded | Final workspace `Succeeded` with CMK; final vault PNA Disabled, bypass None, Deny, no Key Vault IP rules; Enforced NSP association with one inbound rule. A without rule failed `ForbiddenByNsp`; B with rule succeeded. Public control-plane path, not PE |
 
 ### Concepts shown by this record
 
@@ -34,9 +39,9 @@ These are the Phase 1 steps. The actual deployment record follows the table belo
 - **Private-only vault and ARM:** with public access disabled and bypass None, even Azure Resource Manager cannot create a key. Key authoring needs a client with a private path.
 - **Vault-specific DNS zone:** a zone named `<vault>.privatelink.vaultcore.azure.net` linked to one VNet makes that VNet resolve the vault to its own endpoint, while the shared zone serves the other VNets. The most specific zone wins.
 
-### Not yet done
+### Current work remaining
 
-VM peering to the workspace VNet (needs approval); the CMK stage; audit-log review; connectivity and public-denial tests. See [results](results.md).
+Authenticated API access and browser sign-in from the VM; classic-cluster/back-end Private Link; external-network public-denial tests; verify Databricks-managed resource group locations; ask Microsoft/Databricks about Managed Services CMK private/NSP support; delete the account-level NCC rule when approved; decide to retain or safely remove the NSP; secret/history review and local commit; approved cleanup. The classic selected-networks test remains blocked by the management-group modify policy. See [results](results.md) and [progress](progress.md).
 
 ## Concept primer
 
@@ -48,7 +53,7 @@ VM peering to the workspace VNet (needs approval); the CMK stage; audit-log revi
 - **Peering:** direct private routes between two VNets, potentially across regions. It is directional in configuration and nontransitive. It does not copy DNS settings. Existing VNet peering children require approval.
 - **CMK encryption:** authorization and network reachability are separate. A crypto role cannot override a network denial; a PE cannot grant identity permissions. Service key caching complicates runtime proof.
 
-## Future walkthrough after explicit approval
+## Original planned walkthrough (reference; superseded where executed)
 
 | Order | What and why | Intended method / key configuration | Dependencies | Required verification |
 | --- | --- | --- | --- | --- |
@@ -68,9 +73,9 @@ VM peering to the workspace VNet (needs approval); the CMK stage; audit-log revi
 
 - Exact read-only CLI argument arrays: [Invoke-ReadOnlyPreflight.ps1](../scripts/validate/Invoke-ReadOnlyPreflight.ps1).
 - Intended ARM properties and dependency ordering: [deployment plan](deployment-plan.md).
-- Infrastructure templates, tested provisioning commands and cleanup implementation: **not authored/executed yet**; implementation depends on plan approval and unresolved feasibility decisions. Do not substitute untested examples for the actual execution record.
-- Actual configuration values/evidence will live under ignored local storage and be summarized with sanitized aliases here after each successful or failed step.
+- Infrastructure templates and deployment commands are implemented under `infra/` and `scripts/deploy/` and were used for the PoC. Cleanup has a documented approval-gated procedure but no executable cleanup automation. See the execution record above; do not substitute the original planned walkthrough for as-built state.
+- Actual configuration values/raw evidence live under ignored local storage. This guide and related documents summarize sanitized outcomes; never copy raw evidence here.
 
-## Troubleshooting record
+## Initial terminal troubleshooting (resolved)
 
-Terminal execution currently produces prompts rather than requested output; foreground retries and a background marker did not prove command execution. This is not evidence that Azure CLI is missing or credentials are invalid. The existing VM is not inferred from the local Windows workspace. CMK documentation's original URL returned 404; the working current URL is in feasibility references. No firewall rules or public-access settings were changed to troubleshoot.
+During the initial read-only phase, terminal requests returned prompts without command output. The user later confirmed login and restored a working PowerShell extension/terminal; preflight and authorized Azure operations then ran successfully. This historical blocker is resolved and is not the current state. The existing VM was identified and inspected read-only before peering approval. The CMK documentation URL correction remains recorded in the feasibility references.

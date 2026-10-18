@@ -1,8 +1,8 @@
 # Proposed architecture and network flows
 
-**Deployed baseline differs from this proposal.** See the [deployment guide](deployment-guide.md) and [inventory](resource-inventory.md). Differences: NAT gateway instead of a firewall; no route tables, resolver or peerings; the vault endpoint is in the workspace VNet, plus a second vault endpoint in the existing VM's subnet with a VM-only DNS zone. The diagram below is the original proposal; flows F1-F3 and F8 are not yet tested, F4 is verified, F5 is untested.
+**Deployed architecture differs from this original proposal.** See the [deployment guide](deployment-guide.md) and [inventory](resource-inventory.md). Differences: NAT gateway instead of a firewall; no route tables or resolver; VM peerings were later approved and created; the vault endpoint is in the workspace VNet, plus a second vault endpoint in the existing VM's subnet with a VM-only DNS zone. The diagram below remains the proposal, not an as-built diagram. Current validation: F1/F2 reachability only (no authenticated API/browser login), F4 verified from the VM, F5 observed as a public control-plane request admitted by an Enforced NSP inbound rule after the CMK-NSP-03 negative/repeat. F5 is **not** a customer-private-endpoint path. F3 and F8 remain untested.
 
-**Proposed only. Nothing deployed or validated.** All new regional resources, including both VNets and browser-auth workspace, use **koreacentral**. Existing VM location remains unchanged. Private DNS zones/links use Azure-supported global location.
+**The diagram below is the original proposed topology, not the deployed topology.** Its regional-resource intent was Korea Central; actual placement and deviations are recorded in the [inventory](resource-inventory.md). The existing VM's location was left unchanged. Private DNS zones use Azure's global location.
 
 ```mermaid
 flowchart LR
@@ -51,7 +51,7 @@ flowchart LR
   end
   BE -->|Private Link - UI API and SCC relay| CP
   WS -. service .-> CP
-  KC -.->|No documented customer PE route - UNVERIFIED| KV
+  KC -.->|Observed public control-plane path; Enforced NSP rule; not customer PE| KV
 ```
 
 ## Why two new VNets?
@@ -74,13 +74,13 @@ Peering is not transitive. Create **two direct peering pairs**: VM VNet↔worksp
 
 | ID | Source → destination | Purpose | Connectivity and DNS | Controls | State |
 | --- | --- | --- | --- | --- | --- |
-| F1 | VM → shared UI/API PE → control plane | Front-end browser/API access | Direct private peering to workspace VNet; workspace FQDN → approved PE IP | Existing-network approval, TCP 443, workspace public disabled, authenticated API | Planned |
-| F2 | VM → browser-auth PE | Private SSO callback | Private transit route; PE-derived regional auth DNS | New auth workspace, PNA disabled, approved PE | Planned |
-| F3 | Classic compute → shared UI/API PE → control plane | Back-end API and SCC relay | Workspace VNet; workspace/relay private DNS | SCC, no public NIC IPs, `NoAzureDatabricksRules`, required ports | Planned; same PE as F1, different source/role |
-| F4 | VM → vault PE → Key Vault | Create/administer disposable RSA key | Transit private route; vault FQDN → vault PE IP | Vault PNA Disabled, bypass None, RBAC | Planned; proves only VM path |
-| F5 | Managed Services key client → Key Vault | Get/Wrap/Unwrap for control-plane data | **No documented/configurable private path located** | Exact vault firewall policy must remain unchanged | Blocked, not validated |
+| F1 | VM → shared UI/API PE → control plane | Front-end browser/API access | Direct private peering to workspace VNet; workspace FQDN → approved PE IP | Workspace public disabled; authenticated API not yet tested | Reachability verified (private DNS, TCP/TLS, HTTPS 303); auth untested |
+| F2 | VM → browser-auth PE | Private SSO callback | Private transit route; PE-derived regional auth DNS | Auth workspace public disabled; browser flow not yet tested | Reachability verified (private DNS, TCP/TLS, HTTPS 303); browser login untested |
+| F3 | Classic compute → shared UI/API PE → control plane | Back-end API and SCC relay | Workspace VNet; workspace/relay private DNS | SCC, no public NIC IPs, `NoAzureDatabricksRules`, required ports | Not run; no cluster started |
+| F4 | VM → vault PE → Key Vault | Create/administer disposable RSA key | VM VNet; vault FQDN → VM-side vault PE | Vault PNA Disabled, bypass None, RBAC | Verified: private DNS and key creation; proves only VM path |
+| F5 | Managed Services key client → Key Vault | Get/Unwrap for control-plane data | Observed caller is a public Azure address; Enforced NSP inbound rule admits it. No customer PE route was observed or established | Vault PNA Disabled, bypass None; NSP rule is the admission condition in the controlled A/B; RBAC | CMK-NSP-03 A failed `ForbiddenByNsp` with rule absent; B succeeded with rule restored. Not a private path; vendor support unconfirmed |
 | F6 | Key Vault → Azure Monitor | Audit delivery | Azure diagnostic pipeline, not F4/F5 client routing | New diagnostic setting, new LAW, controlled retention | Planned; not proof of private CMK |
 | F7 | Classic compute → platform dependencies | Storage, identity/bootstrap, packages | Dependency-specific; explicit filtered outbound design required | New egress infrastructure/rules; no inbound service exposure | Blocked until allowlist/SKU review |
 | F8 | External public client → workspace/vault | Negative network control | Genuine public egress; public DNS preserves hostname/SNI | Network denial with authorized identity; no firewall weakening | Not run |
 
-NCC is not deployed. It is planned only as a user-requested test (Stage 1 of the [staged plan](deployment-plan.md#staged-plan-after-the-control-experiment-2026-10-18)). Microsoft documents NCC for serverless compute, not for the control plane's Managed Services CMK requests, so flow F5 stays unvalidated as a private path unless the audit log shows otherwise. Azure Resource Manager/Entra authorization traffic and possible controlled dependency egress are distinct from service data-plane ingress. This plan is not a claim that all Azure communications avoid public endpoints.
+An NCC vault private endpoint rule and foreign vault connection are present from the user-requested test; with bypass `None`, NCC did not admit the Managed Services CMK request. Microsoft documents NCC for serverless compute, not for the control plane's Managed Services CMK requests. The NSP A/B shows that F5 succeeds when a public address is explicitly admitted by the Enforced perimeter rule and fails with `ForbiddenByNsp` when the rule is removed. This does not establish private routing or vendor support. Azure Resource Manager/Entra authorization traffic and possible controlled dependency egress are distinct from service data-plane ingress. This architecture is not a claim that all Azure communications avoid public endpoints.

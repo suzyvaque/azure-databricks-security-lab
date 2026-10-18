@@ -14,7 +14,7 @@ Needs the Azure CLI 'nsp' extension (installed on demand). Output carries no add
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Setup', 'AddRule', 'Enforce', 'Transition', 'Status', 'Remove')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Setup', 'AddRule', 'RemoveRule', 'Enforce', 'Transition', 'Status', 'Remove')][string]$Action,
     [string]$AddressPrefix
 )
 
@@ -86,6 +86,11 @@ switch ($Action) {
         $null = Invoke-Az @('network', 'perimeter', 'profile', 'access-rule', 'create', '--name', $ruleName, '--profile-name', $profileName,
             '--perimeter-name', $nsp, '-g', $rg, '--address-prefixes', "[$AddressPrefix]", '-o', 'none')
         Write-Output 'Inbound access rule created (one address).'
+    }
+    'RemoveRule' {
+        $null = Invoke-Az @('network', 'perimeter', 'profile', 'access-rule', 'delete', '--name', $ruleName, '--profile-name', $profileName,
+            '--perimeter-name', $nsp, '-g', $rg, '--yes', '-o', 'none')
+        Write-Output 'Inbound access rule deleted (perimeter, profile and associations unchanged).'
     }
     'Enforce' {
         $profileId = (Invoke-Az @('network', 'perimeter', 'profile', 'show', '--name', $profileName, '-g', $rg, '--perimeter-name', $nsp, '--query', 'id', '-o', 'tsv')).Trim()
