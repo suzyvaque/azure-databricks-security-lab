@@ -22,6 +22,10 @@ param(
     # Key Vault trusted-services bypass. None is the lab requirement. AzureServices is only for the approved control experiment.
     [ValidateSet('None', 'AzureServices')]
     [string]$VaultBypass = 'None',
+    # Vault public network access and allowed addresses. Defaults are the lab posture (Disabled, none).
+    [ValidateSet('Disabled', 'Enabled')]
+    [string]$VaultPublicNetworkAccess = 'Disabled',
+    [string[]]$VaultAllowedIps = @(),
     # Existing VM subnet that receives a vault private endpoint. Defaults to .local/vm/subnet-id.txt.
     [string]$VmSubnetId = '',
     [switch]$ValidateOnly
@@ -73,7 +77,7 @@ try {
     # ---- Preconditions -------------------------------------------------------------
     $account = (Invoke-Az @('account', 'show', '--output', 'json')) | ConvertFrom-Json
     if ($account.environmentName -ne 'AzureCloud' -or $account.state -ne 'Enabled') { throw 'Unexpected cloud or subscription state; stop.' }
-    Write-Output ("Stage={0}; subscription state={1}; region={2}; vaultBypass={3}" -f $Stage, $account.state, $Location, $VaultBypass)
+    Write-Output ("Stage={0}; subscription state={1}; region={2}; vaultBypass={3}; vaultPublicNetworkAccess={4}; vaultAllowedIpCount={5}" -f $Stage, $account.state, $Location, $VaultBypass, $VaultPublicNetworkAccess, @($VaultAllowedIps).Count)
 
     # ---- Run state (idempotent re-runs reuse identifiers) -----------------------
     if (Test-Path $StatePath) {
@@ -135,6 +139,8 @@ try {
             enableCmk = @{ value = ($Stage -eq 'Cmk') }
             keyVersion = @{ value = $KeyVersion }
             vaultBypass = @{ value = $VaultBypass }
+            vaultPublicNetworkAccess = @{ value = $VaultPublicNetworkAccess }
+            vaultAllowedIps = @{ value = @($VaultAllowedIps) }
             tags = @{ value = @{ project = 'dbx-cmk-private-poc'; environment = 'poc'; region = 'koreacentral'; run = $state.RunId; managedBy = 'iac' } }
         }
     }

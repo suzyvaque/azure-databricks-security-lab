@@ -51,7 +51,99 @@ All operator-created resources below go in **one fresh RG**, `rg-dbxcmk-krc-<run
 | Optional new DNS resolver | KRC; dedicated `/28` or larger nondelegation-conflicting inbound subnet with required resolver delegation; only if VM uses custom DNS | Resolver SKU/budget; exact approved forwarding delta |
 | Databricks managed RGs | One service-created RG per target/auth workspace; new, provider-owned; regional resources KRC | Workspaces; exception to customer RG boundary |
 
-No NCC, serverless data connectivity, DBFS-root CMK, disk CMK, public test VM or extra cluster pool is proposed. A minimal classic cluster is a later short-lived validation workload, after KRC node SKU/quota/budget review. Prefer single-node if policy/runtime supports the required test, otherwise smallest approved topology with auto-termination.
+No serverless data connectivity, DBFS-root CMK, disk CMK, public test VM or extra cluster pool is proposed in the original plan. A minimal classic cluster is a later short-lived validation workload, after KRC node SKU/quota/budget review. Prefer single-node if policy/runtime supports the required test, otherwise smallest approved topology with auto-termination. **NCC was not in the original plan; it was added as a user-requested test, see the staged plan below.**
+
+## Staged plan after the control experiment (2026-10-18)
+
+Written **before** any NCC or IP-allowlist change. **Execution status (updated 2026-10-18): Stage 0 done; Stage 1 executed and failed as expected; Stage 2 approved but BLOCKED by a management-group Azure Policy that forces Key Vault public network access to Disabled; Stage 3 pending the user's decision.** Each stage ends with evidence and a decision; a stage is not skipped because the previous one "should" fail.
+
+| Stage | Action | Vault settings during the stage | Who | Evidence and pass criterion | Rollback |
+| --- | --- | --- | --- | --- | --- |
+| 0 | Update README, feasibility, plan, test plan, results (this change) | `publicNetworkAccess=Disabled`, bypass `None`, default Deny, no IP rules (restored 2026-10-18) | Assistant | Docs consistent with the audit and vault reads | None needed |
+| 1 | **NCC test.** Create an NCC in the Databricks account console (Korea Central), attach it to the target workspace (wait about 10 minutes), add a private endpoint rule to the vault (sub-resource `vault`), approve the pending connection on the vault, wait for `ESTABLISHED`. Create a new key version over the VM's private endpoint and apply it with `Deploy-Poc.ps1 -Stage Cmk -KeyVersion <new> -VaultBypass None` | Unchanged from Stage 0 | **Databricks account admin** for the console steps; vault owner approves; assistant runs the deployment and reads the audit | Test CMK-NCC-01. Pass: `KeyGet` and `KeyUnwrap` return 200 with bypass `None`, `CallerIpAddress` no longer the control plane NAT address, no `TrustedService` label. Fail: same 403 `ForbiddenByConnection` | Delete the NCC private endpoint rule (it bills hourly while it exists) and detach the NCC. Vault is unchanged |
+| 2 | **NAT IP allowlist test**, only if Stage 1 fails and you approve the deviation. Read the fresh `CallerIpAddress` from the Stage 1 failure, confirm it against Microsoft's control plane NAT list, then set the vault: public network access Enabled from selected networks, default action Deny, bypass `None`, one IP rule for that address. Re-run the CMK stage | `publicNetworkAccess=Enabled` (selected networks), `defaultAction=Deny`, bypass `None`, `ipRules=[<one address>]`, no VNet rules | Assistant (a new script that changes only these properties, logging before and after, will be added at that point) | Test CMK-IP-01. Pass: `KeyGet` and `KeyUnwrap` 200 with `IsAddressAuthorized=true`, no `TrustedService` label. Also test from an external network that the vault refuses other addresses | Set `publicNetworkAccess=Disabled` and remove the IP rule with the same script |
+| 3 | Decide the final posture, restore Disabled and `None` unless you decide otherwise, update the classification and the support question | Per decision | You | Documented decision and the final vault read | Same script |
+
+Rules that apply to every stage:
+
+- The Key Vault setting changes are limited to the properties named in the table. Each change logs the vault's network settings before and after.
+- Existing infrastructure outside the PoC resource group is not changed by these stages. The NCC lives in the Databricks account, not in Azure.
+- Stage 2 is not started without your explicit go-ahead, because it ends the "public access Disabled" posture.
+- The workspace carries the key already and keeps working on Databricks's cached key while the vault blocks the control plane; it may degrade when the cache expires (interval not documented). That is acceptable for these tests but is recorded as a risk.
+- Any result, positive or negative, is recorded as observed. A pass in Stage 2 does not become "private endpoint only".
+
+Approximate cost: NCC private endpoint rule is billed hourly by Azure while it exists (small; delete after the test). Stage 2 has no extra Azure resource cost.
+
+### Stage 1 result and a correction (2026-10-18)
+
+Stage 1 was executed. Result: **failed** (same 403 `ForbiddenByConnection`, same caller address, workspace `Failed` with its earlier key version). Details and limits are in [results](results.md). **Correction:** the pass criteria in the table above that mention "no `TrustedService` label" are withdrawn. The label appeared on the denied requests too. The discriminators are HTTP status 200 and `IsRbacAuthorized` / `IsAddressAuthorized`.
+
+**Stage 2 approval and an implementation constraint.** The user approved Stage 2 after Stage 1 failed. The CMK stage redeploys the vault template, which previously hard-coded public access Disabled and no IP rules and would have undone the Stage 2 vault setting. The vault template now takes the public network access value and an allowed-address list as parameters (defaults keep the lab posture: Disabled, none), and a new script changes only those properties with a before/after log.
+
+**Stage 2 outcome: blocked (2026-10-18).** The script added the IP rule, but public network access could not be set to Enabled: a management-group Azure Policy (`KeyVault_PublicNetwork_Modify`, effect `modify`) rewrites it to Disabled on every write, and three write paths all reported success while the value stayed Disabled. The vault was restored to the lab posture (verified: public Disabled, default Deny, bypass `None`, 0 IP rules). The CMK stage was not re-run. No exemption or governance change was attempted. Details are in [results](results.md).
+
+**Recovery note.** The workspace is `Failed` with its earlier key version. A CMK-free Baseline redeploy is not a safe recovery now, because the workspace already has a managed-services key and the Baseline template sends no encryption block; its effect is untested. The known-good way to return the workspace to `Succeeded` is a successful CMK update.
+
+### Stage 2b: network security perimeter (NSP), then the selected-networks IP test (2026-10-18)
+
+Written **before** execution. Stage 2 was blocked by the management-group policy `KeyVault_PublicNetwork_Modify`, whose display name says it excludes Key Vaults configured with an NSP. The user asked to try NSP first and then the selected-networks test.
+
+**What Microsoft documents** (NSP concepts page updated 2026-10-02; Key Vault network security page updated 2026-06-16; NSP CLI quickstart):
+
+- Key Vault is an NSP-supported resource (generally available). The perimeter, a profile, an access rule and a resource association are separate resources.
+- Two access modes. **Transition** (the default, formerly Learning) only logs traffic that would have been denied. **Enforced** denies all traffic except intra-perimeter traffic and traffic allowed by an access rule. For Key Vault, in Enforced mode the `publicNetworkAccess` setting "is overridden by the network security perimeter rules".
+- **Private endpoint traffic is not subject to NSP rules**, so the VM's private path to the vault keeps working.
+- Inbound access rules can be public IP address prefixes or subscriptions. Key Vault has no outbound concept.
+- "Switching Public Network Access to Secure by perimeter, then forbids trusted services even if configured to allow trusted services."
+- Audit logs: for PaaS resource logs use a Log Analytics workspace in the **same perimeter**. A workspace in Enforced mode would block queries from this VM's public address, so the workspace is associated in **Transition** mode only.
+- Removing an association while `publicNetworkAccess` is `SecuredByPerimeter` locks the resource down.
+- The Azure CLI needs the `nsp` extension (`az network perimeter ...`).
+
+| Step | Action | Vault state | Expected outcome (stated in advance) | Rollback |
+| --- | --- | --- | --- | --- |
+| B1 | Create the perimeter and a profile; associate the vault **and** the Log Analytics workspace in **Transition** mode. Read the vault. Then attempt to set public network access Enabled again | bypass `None`, default Deny | Unknown whether the policy treats a Transition-mode association as NSP-configured. Observe: does the vault's `publicNetworkAccess` change, and does an Enabled write now stick? | Delete the associations, profile and perimeter |
+| B2 | **Selected networks test (the user's second request).** If B1 let public access become Enabled: vault public network access Enabled for selected networks, default Deny, bypass `None`, one IP rule for the control plane address from the audit log; re-run `-Stage Cmk` with `-VaultBypass None -VaultPublicNetworkAccess Enabled -VaultAllowedIps <address>` | As stated | If Enabled sticks, the control plane request should be admitted by the IP rule: `KeyGet`/`KeyUnwrap` 200 with `IsAddressAuthorized=true`. That would be a pass for a selected-networks variant, never for private-endpoint-only | `Set-VaultIpAllowlist.ps1 -Restore`, then remove the perimeter |
+| B3 | Only if B1 did not let public access become Enabled: **NSP-native variant.** Add an NSP inbound access rule for the same address and switch the vault association to **Enforced**; re-run the CMK stage | Vault association Enforced, workspace association stays Transition | Uncertain. The docs say Enforced overrides the public access setting, but the Key Vault page ties perimeter control to `SecuredByPerimeter`. Whether a vault left at `Disabled` honors the NSP rule is exactly what this step tests | Switch the association back to Transition and delete the perimeter |
+
+**Risks.** The vault is reachable from one shared Databricks control plane address during the tests; RBAC remains the real boundary and the window is short. A failed CMK update leaves the workspace `Failed` with its earlier key version (a successful update would also return it to `Succeeded`). Enforcing on the vault could hide the vault's diagnostic logs if the workspace were not in the perimeter, which is why it is associated.
+
+**Limits of what B2 and B3 can show.** Both depend on the address staying the same; Microsoft warns that control plane addresses change. A pass is evidence for that address at that time.
+
+### Stage 1 runbook (NCC test)
+
+Placeholders: `<vault resource ID>` is the PoC vault's Azure resource ID (read it with `az keyvault list -g <PoC resource group> --query "[0].id" -o tsv`); `<workspace>` is the target workspace. Identifiers are kept in local evidence, not in this repository.
+
+**Baseline captured before any NCC change (2026-10-18 08:17 UTC, [Get-NccTestStatus.ps1](../scripts/validate/Get-NccTestStatus.ps1)).** Vault: public access Disabled, bypass `None`, default Deny, 0 IP rules. Vault connections: only our two endpoints, both Approved, no foreign connection. Target workspace: `Succeeded`, public access Disabled, CMK applied. Last control-plane key requests: 2026-10-18 06:50 UTC, four requests, all 200, trusted service `AzureDatabricks` (from the control experiment). No control-plane key request since the bypass was restored.
+
+#### Part A \u2014 Databricks account admin (account console, cannot be automated from Azure)
+
+1. Sign in at the Azure Databricks account console (`accounts.azuredatabricks.net`) with a Microsoft Entra account that is a Databricks **account admin**. If no one has the role, an Entra Global Administrator can sign in first and then grant it. If you cannot sign in, stop and report; do not use another account.
+2. **Create the NCC.** Security \u2192 Network connectivity configurations \u2192 Add network configuration. Name: `ncc-dbxcmk-krc-test`. Region: **Korea Central**. If Korea Central is not offered, stop and report; do not choose another region. Select Add.
+3. **Attach the NCC to the target workspace.** Workspaces \u2192 the target workspace (its numeric workspace ID is in the workspace URL `adb-<id>.<n>.azuredatabricks.net`) \u2192 Update workspace \u2192 Network connectivity configurations \u2192 select the NCC \u2192 Update. If the NCC is not listed, confirm that the workspace and the NCC are in the same region.
+4. Wait about 10 minutes for the attachment to take effect.
+5. **Add the private endpoint rule.** Open the NCC \u2192 Private endpoint rules \u2192 Add private endpoint rule. Destination Azure resource ID: `<vault resource ID>`. Azure subresource ID: `vault`. Select Add. The rule shows `CREATING`, then `PENDING`.
+6. Tell the assistant when the rule shows `PENDING`.
+
+#### Part B \u2014 vault owner (Azure; can be done by the assistant on request)
+
+- **Step 7.** Azure portal \u2192 the Key Vault \u2192 Networking \u2192 Private endpoint connections \u2192 Private access tab. A new connection created by Databricks should appear as **Pending**. Select it \u2192 Approve. Alternatively ask the assistant to run `./scripts/validate/Get-NccTestStatus.ps1` to see the connection name, then `./scripts/deploy/Approve-VaultConnection.ps1 -ConnectionName <name>`. The script approves only the named, currently Pending connection and refuses our own endpoints.
+- **Step 8.** Back in the account console, refresh the NCC until the rule shows `ESTABLISHED`. If it shows `REJECTED`, `DISCONNECTED`, `EXPIRED` (14 days) or `CREATE_FAILED`, record the state and the error text and stop.
+
+#### Part C \u2014 assistant (the test itself, vault still bypass `None` and public Disabled)
+
+- **Step 9.** Record the current key version, then create a new key version over the VM's private endpoint: `Copy-Item .local/deploy/key.json .local/deploy/key-before-ncc.json; ./scripts/deploy/New-CmkKey.ps1`. The old version stays in the vault and must not be deleted for 24 hours.
+- **Step 10.** Apply the new version with the vault bypass left at `None`: `$kv = (Get-Content -Raw .local/deploy/key.json | ConvertFrom-Json).KeyVersion; ./scripts/deploy/Deploy-Poc.ps1 -Stage Cmk -KeyVersion $kv -VaultBypass None`. The workspace update has taken a long time in earlier runs (duration not measured).
+- **Step 11.** Read the result with `./scripts/validate/Get-NccTestStatus.ps1 -SinceUtc <time of step 10>` and record it as test CMK-NCC-01.
+
+**Interpretation, decided in advance.**
+
+- **Pass:** the update succeeds with bypass `None` and the audit shows `KeyGet` and `KeyUnwrap` 200 with no `TrustedService` label and a changed caller address. That would be undocumented behavior and needs vendor confirmation before anyone relies on it.
+- **Fail:** the same 403 `ForbiddenByConnection` and `IsRbacAuthorized` empty. NCC does not carry the control plane's CMK requests. This is the expected result.
+- **Not conclusive:** the rule never reaches `ESTABLISHED`, or the update fails for a different reason. Record the exact error.
+
+**Risk.** A failed update leaves the workspace in provisioning state `Failed`. The workspace keeps its existing key version, and a Baseline redeploy (no CMK change) is the known way to recover it. While the vault blocks the control plane, the workspace runs on Databricks's cached key and may degrade when the cache expires (interval not documented).
+
+**Rollback after the test.** Delete the NCC private endpoint rule (Azure keeps billing it hourly while it exists), then detach or delete the NCC. Reject or delete the corresponding connection on the vault if it remains. Databricks may keep the endpoint on the vault for one day after the rule is removed. Re-run `Get-NccTestStatus.ps1` and confirm the vault is back to only our two connections.
 
 ## Required workspace ARM/Bicep property contract
 

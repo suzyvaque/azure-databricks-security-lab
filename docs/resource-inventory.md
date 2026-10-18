@@ -13,7 +13,7 @@ All resources are in one new resource group in `koreacentral` unless noted. Vali
 | vnet-…-transit | VNet | koreacentral | /24; auth host/container (delegated, /27) and PE (/26) subnets | Configuration | In RG |
 | nsg-…-ws, nsg-…-auth | NSG | koreacentral | Three outbound rules required by the Databricks network intent policy (SQL 3306, Storage 443, EventHub 9093) | Configuration | In RG |
 | nat-…, pip-…-nat | NAT gateway, public IP | koreacentral | Outbound-only egress for the workspace subnets; unfiltered | Exists | In RG |
-| dbw-… | Databricks workspace | koreacentral | Premium; custom VNet; `enableNoPublicIp=true`; public access Disabled; `NoAzureDatabricksRules`; **provisioning state `Succeeded` with the managed-services key applied (vault URI, key name, pinned version) after the control experiment; it had been `Failed` after the first CMK attempt** | Configuration; CMK applied | In RG; managed RG separate; **CMK cannot be disabled once enabled** |
+| dbw-… | Databricks workspace | koreacentral | Premium; custom VNet; `enableNoPublicIp=true`; public access Disabled; `NoAzureDatabricksRules`; **provisioning state `Failed` after the NCC test (bypass `None`); it keeps its earlier managed-services key version (it had been `Succeeded` after the control experiment)** | Configuration; CMK applied | In RG; managed RG separate; **CMK cannot be disabled once enabled** |
 | dbw-…-auth | Databricks workspace (auth only) | koreacentral | Same private-only settings; no compute | Configuration | In RG; managed RG separate |
 | pe-…-uiapi | Private endpoint | koreacentral | `databricks_ui_api`, Approved/Succeeded; front-end and back-end roles | Configuration | In RG |
 | pe-…-auth | Private endpoint | koreacentral | `browser_authentication`, Approved/Succeeded | Configuration | In RG |
@@ -22,7 +22,7 @@ All resources are in one new resource group in `koreacentral` unless noted. Vali
 | privatelink.azuredatabricks.net | Private DNS zone | global | Links: workspace VNet and transit VNet; 3 record sets | Configuration | In RG |
 | privatelink.vaultcore.azure.net | Private DNS zone | global | Links: workspace VNet and transit VNet | Configuration | In RG |
 | \<vault\>.privatelink.vaultcore.azure.net | Private DNS zone | global | One link: the **existing VM VNet**; one A record to the VM-side endpoint | Resolves privately from the VM | In RG; link affects existing VNet |
-| kv… | Key Vault | koreacentral | Standard; RBAC; public access Disabled; **bypass `AzureServices` (changed from `None` on 2026-10-18 for the control experiment)**; default Deny; no IP rules; soft delete 7 days; purge protection | Configuration; private access from the VM; control-plane access as a trusted service | Soft-deleted vault remains after RG deletion |
+| kv… | Key Vault | koreacentral | Standard; RBAC; public access Disabled; **bypass `None` (changed to `AzureServices` for the control experiment on 2026-10-18, restored the same day)**; default Deny; no IP rules; soft delete 7 days; purge protection | Configuration; private access from the VM; control-plane access as a trusted service | Soft-deleted vault remains after RG deletion |
 | cmk-managed-services | Key | koreacentral (vault child) | RSA 2048 software key, enabled; created over the private endpoint | Enabled | With vault |
 | law-… | Log Analytics workspace | koreacentral | PerGB2018, 30-day retention | Exists | In RG |
 | audit-to-law | Diagnostic setting | Vault child | AuditEvent to the new workspace | Created; no log query run yet | With vault |
@@ -81,6 +81,8 @@ Aliases/prefix lengths below are not actual addresses or allocations. All actual
 - One private IP allocated in the existing VM subnet (the endpoint and NIC resources are in the PoC RG).
 - One private DNS zone link from the PoC RG to the existing VM VNet, plus the vault-specific zone link.
 - Two Databricks-managed resource groups (service-created).
+- **Governance finding, not a change we made:** a management-group Azure Policy (`KeyVault_PublicNetwork_Modify`, effect `modify`) applies to the vault and forces `publicNetworkAccess` to `Disabled` on every write. We did not alter it.
+- One private endpoint connection on the vault created by Databricks from the account-level NCC private endpoint rule (Approved). It is not in our templates. The NCC itself lives in the Databricks account, outside Azure. **Remove by deleting the NCC private endpoint rule in the account console**; Databricks may keep the endpoint on the vault for up to a day. The rule bills hourly while it exists.
 - The VM, its NIC, NSG, routes and DNS-server settings were **not** modified.
 
 Not approved and not done: existing resolver changes, NSG/UDR changes.

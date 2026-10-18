@@ -11,6 +11,8 @@ After `-Stage Baseline` was run, a rerun must keep the Databricks network intent
 
 - [Set-VaultBypass.ps1](Set-VaultBypass.ps1) changes **only** the vault's trusted-services bypass (`-Bypass None` or `-Bypass AzureServices`), prints the vault's network settings before and after, and refuses to finish if public access is not Disabled. Use `-Bypass None` to restore the lab posture. `Deploy-Poc.ps1` takes `-VaultBypass` (default `None`) so a redeploy never silently resets the setting. Run `-Stage Cmk -VaultBypass AzureServices` while the vault is at `AzureServices`.
 
+- [Approve-VaultConnection.ps1](Approve-VaultConnection.ps1) approves exactly one **named, currently Pending** private endpoint connection on the vault (for the NCC test). It refuses connections that belong to our own endpoints and prints the state before and after. See the [Stage 1 runbook](../../docs/deployment-plan.md#stage-1-runbook-ncc-test).
+
 The CMK stage is the experiment's decisive step. Failure is a valid result and must not be worked around with public access or the trusted-services bypass.
 
 Run state, CIDRs and a transcript go to ignored `.local/deploy`. VM peering/DNS beyond the vault endpoint is a separate approval-gated step not included here.
@@ -33,3 +35,5 @@ The [draft plan](../../docs/deployment-plan.md) defines the future modules and o
 Future scripts must require explicit target subscription/RG confirmation from ignored local configuration, reject existing PoC RGs unless a verified run manifest establishes ownership, reject every region other than `koreacentral` for regional resources, check resource IDs/tags and stage dependencies, keep workspace/vault PNA disabled from creation, emit no credentials, and never run cleanup on failure without separate approval. Global DNS resources must use `global` where Azure requires it.
 
 Exact provisioning commands and tested templates are deferred, not claimed as delivered. Read-only commands already exist in the validation script. Do not run generic documentation examples that enable public network access.
+
+- [Set-VaultIpAllowlist.ps1](Set-VaultIpAllowlist.ps1) sets the vault to the Stage 2 posture (public network access Enabled for selected networks, default Deny, bypass None, exactly one allowed public address) or, with `-Restore`, back to the lab posture. It refuses private ranges and CIDRs wider than /24, prints the vault settings before and after, and stops if the intended posture is not reached. **In this subscription the Enabled setting cannot be reached because a management-group Azure Policy forces Key Vault public network access to Disabled**; the script then stops, by design, with the IP rule left in place until `-Restore` is run. `Deploy-Poc.ps1` also takes `-VaultPublicNetworkAccess` and `-VaultAllowedIps` (defaults: Disabled, none) so a redeploy does not reset the vault setting.

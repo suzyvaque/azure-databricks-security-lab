@@ -6,6 +6,8 @@
 
 A second read-only tool, [Get-VaultStatus.ps1](Get-VaultStatus.ps1), reports the vault's network flags, private endpoint states, whether the vault name resolves to a private address from the machine it runs on, and key enablement. It was run on 2026-10-18 (see [results](../../docs/results.md)). It writes details to ignored `.local/validate`.
 
+[Get-NccTestStatus.ps1](Get-NccTestStatus.ps1) is read-only status for the NCC test: vault network settings, every private endpoint connection on the vault (connections that are not ours are counted as foreign, which is how an NCC rule would appear), the target workspace state and the CMK key version suffix, and the Databricks control plane's recent key requests from the audit log. The console summary prints no addresses; full detail is written to ignored `.local/validate`.
+
 ## Inputs and output
 
 - Run from PowerShell 5.1+ in the existing VM's repository checkout if local OS DNS/routes should describe that VM. Running from a local laptop does not establish VM OS state.

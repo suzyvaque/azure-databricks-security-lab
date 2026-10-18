@@ -10,6 +10,16 @@ param databricksServicePrincipalObjectId string
 ])
 param bypass string = 'None'
 
+@description('Public network access. Disabled is the lab posture. Enabled (selected networks, with default action Deny) is used only for the approved IP allowlist test.')
+@allowed([
+  'Disabled'
+  'Enabled'
+])
+param publicNetworkAccess string = 'Disabled'
+
+@description('Public IPv4 addresses or CIDR ranges allowed through the vault firewall. Empty is the lab posture.')
+param allowedIps array = []
+
 var keyNameValue = 'cmk-managed-services'
 // Key Vault Crypto Service Encryption User
 var cryptoServiceEncryptionUserRoleId = 'e147488a-f6f5-4113-8e2d-b22465e65bf6'
@@ -41,11 +51,13 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
     enablePurgeProtection: true
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: publicNetworkAccess
     networkAcls: {
       defaultAction: 'Deny'
       bypass: bypass
-      ipRules: []
+      ipRules: [for ip in allowedIps: {
+        value: ip
+      }]
       virtualNetworkRules: []
     }
   }

@@ -29,6 +29,16 @@ param databricksServicePrincipalObjectId string
 ])
 param vaultBypass string = 'None'
 
+@description('Key Vault public network access. Defaults to Disabled (the lab requirement).')
+@allowed([
+  'Disabled'
+  'Enabled'
+])
+param vaultPublicNetworkAccess string = 'Disabled'
+
+@description('Public IPv4 addresses or CIDRs allowed through the vault firewall. Defaults to none.')
+param vaultAllowedIps array = []
+
 @description('Apply Managed Services CMK to the target workspace. False for the baseline stage.')
 param enableCmk bool = false
 
@@ -65,6 +75,8 @@ module keyvault 'modules/keyvault.bicep' = {
     tags: tags
     databricksServicePrincipalObjectId: databricksServicePrincipalObjectId
     bypass: vaultBypass
+    publicNetworkAccess: vaultPublicNetworkAccess
+    allowedIps: vaultAllowedIps
   }
 }
 
