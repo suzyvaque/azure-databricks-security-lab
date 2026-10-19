@@ -2,7 +2,25 @@
 
 ## Current outcome
 
-**Six CMK attempts, to be read together.**
+### Clarified selected-networks retry (2026-10-19)
+
+The owner clarified that “selected networks” means **Allow public access from specific virtual networks and IP addresses**: `publicNetworkAccess=Enabled`, `defaultAction=Deny`, bypass `None`, one control-plane IP rule, no additional VNet rules. This supersedes the earlier interpretation that PNA must remain Disabled. With the PoC NSP already removed, `Set-VaultIpAllowlist.ps1` explicitly attempted Enabled and read the vault back. Before and after: **Disabled / None / Deny / one IP rule / zero VNet rules**. The script stopped with “Stage 2 posture not reached.” Follow-up read-back at 2026-10-19 00:01:21 UTC confirmed Disabled and workspace `Failed`, previous key retained. **Verdict: intended selected-network CMK test blocked at configuration, not executed.** The earlier CMK-IP-02 failure is only the Disabled-PNA negative test, not evidence that active selected networks fails. Previously verified management-group `KeyVault_PublicNetwork_Modify` rewrites Enabled to Disabled; no policy exemption or assignment change was made. An active selected-networks CMK test requires the policy owner to permit Enabled, followed by read-back verification and a separate CMK attempt. No additional key version or CMK update was issued after this blocked retry.
+
+**Latest result — CMK-IP-02, 2026-10-19 local date:** PoC NSP removed and absence verified. Vault public Disabled / bypass `None` / default Deny with one stored control-plane IP firewall rule. A new key version was created privately and applied; the update failed with wrapped HTTP 403 `ForbiddenByConnection`. Workspace provisioning is now `Failed`, prior CMK version retained. No public-enable write, bypass change, NCC deletion or NSP recreation was performed. The six earlier attempts below are historical outcomes.
+
+### Final no-NSP test (CMK-IP-02)
+
+- **Owner authorization:** remove the PoC NSP; retain public access Disabled and bypass `None`; add only the previously observed control-plane address to the vault IP firewall; retry CMK.
+- **Verified changes:** PoC perimeter absent at 2026-10-18 23:48:22 UTC; vault properties remained Disabled / None / Deny with exactly one stored IP rule and no VNet rules. Owned vault PEs and the foreign Databricks/NCC connection remained Approved.
+- **Procedure/outcome:** new key version created through the VM PE; CMK deployment preserved the IP rule explicitly via `VaultAllowedIps`. The stage ran 23:51:10–23:54:05 UTC and failed. The workspace returned `Failed`, retaining its prior key version rather than the attempted version. Read-back completed at 23:54:08 UTC.
+- **Exact denial:** Databricks `PERMISSION_DENIED` wrapped Key Vault HTTP 403, inner code `ForbiddenByConnection`: the connection is not an approved private link, bypass is not `AzureServices`, and public access is Disabled. The service-specific network reason—not the outer missing-permission wording—identifies this denial. Audit ingestion is checked separately; do not invent request rows or authorization fields absent from the query.
+- **What was tested:** the exact Disabled / None configuration with NSP removed and one stored firewall IP rule. It failed as predicted.
+- **What cannot be tested under these constraints:** active classic selected-network IP admission. Key Vault public access Disabled rejects public configurations; a stored IP rule is not an override. Active selected networks requires public access Enabled with default Deny. The user explicitly retained Disabled in this follow-up, and earlier tests also showed a management-group modify policy rewriting Enabled to Disabled. No policy exception or broader write was attempted.
+- **Final state/risk:** NSP remains deleted; one inactive IP rule remains stored; bypass None and public Disabled remain; workspace provisioning `Failed` with previous CMK retained. No automatic recovery. Cached-key runtime effects are not measured and the cache interval is undocumented. Obtain approval before recreating NSP or changing bypass/public access.
+
+Source: [Microsoft Key Vault network security — public access disabled](https://learn.microsoft.com/en-us/azure/key-vault/general/network-security#public-access-disabled-private-endpoint-only). Full identifiers, the IP, key versions and raw deployment evidence remain in ignored local storage.
+
+**Earlier six CMK attempts, to be read together with the final seventh attempt above.**
 
 1. **The requested configuration (public access Disabled, trusted-services bypass `None`, private endpoint only): failed in the tested attempt with 403 `ForbiddenByConnection`.** This is a runtime result for this setup, not a vendor-confirmed unsupported classification; the supported route remains unconfirmed.
 2. **The documented trusted-service configuration (public access Disabled, bypass `AzureServices`): functionally validated.** The only change was the vault's bypass, and the same CMK deployment then succeeded.

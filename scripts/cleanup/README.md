@@ -1,6 +1,6 @@
 # Cleanup design — not executable and not approved
 
-PoC resources were created and remain deployed. **No cleanup has been run or approved.** Do not infer that the subscription contains no other resources. Current Azure state and cross-boundary artifacts are listed in [the inventory](../../docs/resource-inventory.md); cleanup requires separate explicit approval.
+PoC resources were created and remain deployed. **Full cleanup has not been approved or run.** The user separately authorized removal of the PoC NSP for the final CMK-IP-02 experiment on 2026-10-19 (local date); its absence was verified. This approval does not authorize deleting the workspace, vault, NCC or VM networking. Do not infer that the subscription contains no other resources. Current Azure state and cross-boundary artifacts are listed in [the inventory](../../docs/resource-inventory.md); full cleanup requires separate explicit approval.
 
 ## Future approval-gated sequence
 

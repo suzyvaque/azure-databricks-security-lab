@@ -1,16 +1,22 @@
 # Azure Databricks private-network CMK security lab
 
+**Selected-networks clarification and retry — 2026-10-19:** the user means the portal option **Allow public access from specific virtual networks and IP addresses**, i.e. PNA Enabled, default Deny, bypass None, one control-plane IP rule. After NSP removal we explicitly attempted that configuration. Before/after read-back remained PNA Disabled / None / Deny / one IP rule / zero VNet rules; the script stopped with “Stage 2 posture not reached.” The intended selected-networks CMK test is **blocked, not failed or passed**. The preceding Disabled-PNA CMK denial is a separate negative test and is not a selected-networks result. No additional CMK update was run after the blocked configuration attempt; workspace remains `Failed` with its prior CMK version. The previously identified organization modify policy is the known blocker; no policy exemption was attempted.
+
+> **Latest verified state — 2026-10-19 local date (2026-10-18 23:54 UTC):** PoC NSP removed. Vault public access Disabled, bypass `None`, default Deny, one stored control-plane IP firewall rule. CMK-IP-02 failed with HTTP 403 `ForbiddenByConnection`; workspace provisioning state is `Failed`, with the prior CMK version retained. No public access, bypass or NSP recovery was enabled. A stored IP rule does not admit public traffic while public access is Disabled.
+
 ## Abstract
 
 This Korea Central PoC tested whether Azure Databricks Managed Services CMK can use Key Vault with public network access disabled, trusted-services bypass `None`, and customer Private Endpoint-only connectivity. The strict configuration failed with `ForbiddenByConnection`; a Databricks-created NCC connection was Approved on the vault, but the CMK request still failed. The NCC attachment and `ESTABLISHED` rule state were not independently verified. CMK succeeded when the trusted-services bypass was set to `AzureServices`, and also when an Enforced Network Security Perimeter (NSP) admitted the observed Databricks control-plane IP while bypass remained `None`. Removing that NSP rule caused `ForbiddenByNsp`; restoring it and applying a new key version succeeded. Audit logs confirmed successful key retrieval/unwrap and RBAC authorization.
 
-**Conclusion:** the tested NSP configuration works functionally, but it admits a public control-plane source—it does not route CMK through a customer Private Endpoint. The requested private-endpoint-only CMK path was not achieved, and official support remains unconfirmed. The workspace is currently `Succeeded`; the vault is public access Disabled / bypass `None`, with the NSP rule retained. Authentication, classic-cluster back-end, external-denial and vendor-support checks remain.
+The final follow-up removed NSP, kept public access Disabled and bypass `None`, stored the control-plane address in the vault firewall, and retried CMK with a new key version. It failed with `ForbiddenByConnection`; the IP rule did not override public access Disabled. Active selected-network IP access requires public access Enabled, which this request excluded and previous organizational-policy tests prevented.
+
+**Conclusion:** the requested private-endpoint-only CMK path was not achieved. The successful NSP variant admitted a public control-plane source, not a customer Private Endpoint route; official support remains unconfirmed. NSP is now removed and the workspace is `Failed` with its prior CMK version retained. Recovery requires a separately approved working admission path. Authentication, classic-cluster back-end, external-denial and vendor-support checks remain.
 
 ## Project dashboard
 
-**Baseline infrastructure deployed and verified in Azure (Korea Central). Managed Services CMK failed with bypass `None` and private-endpoint-only access; succeeded when only the trusted-services bypass changed to `AzureServices`; and failed again with bypass `None` plus an approved Databricks NCC connection. With bypass `None`, an Enforced NSP plus one inbound control-plane address rule succeeded; removing that rule failed with `ForbiddenByNsp`, and restoring it then applying another key version succeeded. The successful control-plane requests used a public address, not a customer private endpoint. The target workspace is currently `Succeeded` with CMK. **The vault remains inside the Enforced perimeter with that rule; it is reachable from one shared Databricks address. This deviates from private-endpoint-only; a keep-or-teardown decision remains (see next actions).**
+**Baseline infrastructure remains deployed in Korea Central. Seven CMK attempts establish that the requested private-only configuration failed; trusted-service bypass and an Enforced NSP address rule each admitted the public control-plane caller. In the final test, the owner-approved NSP removal plus one stored vault IP rule at public Disabled / bypass `None` again failed with `ForbiddenByConnection`. NSP is absent; the target workspace is currently `Failed` with its previous CMK version. Recovery or full cleanup requires a separate decision.**
 
-Last documentation update: 2026-10-18.
+Last documentation update: 2026-10-19 (local date). The latest-state note above supersedes the historical run summaries below.
 
 ### Objective and current finding
 
@@ -32,6 +38,8 @@ Current experimental results, **read together:**
 
 Summary: bypass `None` without an NSP rule failed; bypass `AzureServices` succeeded; bypass `None` with NCC failed; Enforced NSP with its inbound rule succeeded; removing the rule failed with `ForbiddenByNsp`; restoring it succeeded.
 
+**Final run 7 / CMK-IP-02:** NSP deleted; public Disabled / bypass `None` / Deny; one stored control-plane IP firewall rule; new key version applied. Update failed with 403 `ForbiddenByConnection` (23:51:10–23:54:05 UTC on 2026-10-18). Workspace now `Failed`, prior key version retained. This tests the requested flags, not active selected-network admission.
+
 See [results](docs/results.md).
 
 **Control experiment (2026-10-18, user-approved):** one setting changed, `bypass: None` to `AzureServices`. A side-by-side table of both runs is in [results](docs/results.md). Public access stayed Disabled, default action stayed Deny, no IP rules were added. The first failure was therefore a network-policy denial, not a permission problem: RBAC (the Crypto Service Encryption User role) was already correct and passed once the network layer let the request through.
@@ -44,7 +52,7 @@ See [results](docs/results.md).
 | --- | --- | --- |
 | 1 — Feasibility/research | Completed (with open support question) | Documentation reviewed; preflight collected; login, providers, policies, permissions and Korea Central availability verified. CMK private-only route remains undocumented |
 | 2 — Deployment plan | Completed | Plan approved by the user's instruction to create resources; deviations recorded in the deployment guide |
-| 3 — Deployment | Completed | Baseline, VM peering and CMK setup complete; target workspace currently `Succeeded` with Managed Services CMK |
+| 3 — Deployment | Completed; recovery decision open | Baseline, VM peering and CMK configured; final no-NSP update failed; target provisioning state `Failed`, previous CMK retained |
 | 4 — Validation | In Progress | Private VM reachability and bypass/NCC/NSP CMK tests complete, including the NSP negative/repeat; authenticated API/browser, classic cluster back-end and external public-denial tests remain |
 | 5 — Reporting | In Progress | Living documentation synchronized with CMK-NSP-03; external support response and final report pending |
 | 6 — Cleanup | Not Started | Not authorized; nothing removed |
@@ -64,11 +72,11 @@ Verified in Azure after the Baseline stage succeeded (all 8 deployment modules `
 | Item | Verified state |
 | --- | --- |
 | Resource group and regional resources | New RG; every regional resource in `koreacentral` |
-| Both Databricks workspaces | Premium, provisioning `Succeeded`, public network access **Disabled**, required NSG rules `NoAzureDatabricksRules`. The target workspace now carries the managed-services key (key vault URI, key name and pinned version) |
+| Databricks workspaces | Premium, public network access **Disabled**, required NSG rules `NoAzureDatabricksRules`. Target provisioning `Failed` after CMK-IP-02, previous managed-services key retained; the auth-only workspace is separate |
 | Target workspace VNet injection | Custom VNet with new host and container subnets, `enableNoPublicIp=true` |
 | Workspace private endpoint connections | Approved (`databricks_ui_api`, `browser_authentication`) |
-| Key Vault | Public access **Disabled**, bypass **`None`**, default action Deny, no Key Vault IP rules, purge protection and RBAC on; associated with an **Enforced NSP with one inbound control-plane `/32` rule** |
-| Network security perimeter | Vault association Enforced; one inbound rule present; Log Analytics association Learning/Transition; removal of the rule failed CMK with `ForbiddenByNsp`, restoration succeeded |
+| Key Vault | Public access **Disabled**, bypass **`None`**, default Deny, one stored control-plane IP firewall rule (inactive while public access Disabled), purge protection and RBAC on; no PoC NSP |
+| Network security perimeter | Deleted under owner approval for CMK-IP-02; absence verified. Earlier NSP success/negative/repeat remains historical evidence |
 | Vault private endpoints | Both Approved/Succeeded |
 | Vault DNS from the VM | Resolves to a **private** address |
 | Key `cmk-managed-services` | Created from the VM over the private endpoint; enabled |
@@ -85,7 +93,7 @@ No commit, secret scan or push has been performed. **No push is authorized.**
 ### Next actions / approval gates
 
 1. Remove the NCC private endpoint rule from the Databricks account console when authorized; it may incur hourly charges until removed. The foreign vault connection may persist temporarily after rule deletion.
-2. Decide whether to retain the current Enforced NSP rule for continued operation or approve a safe teardown. CMK-NSP-03 showed that removing the rule blocks a CMK update; the impact of cached-key expiry is not documented. Do not remove the rule or association without a recovery plan.
+2. Decide recovery or full cleanup. NSP is already removed and the latest workspace CMK update failed. Recreating the known-working NSP rule or enabling trusted-service bypass requires separate approval; neither was done automatically. Key-cache duration and runtime impact are undocumented; provisioning `Failed` is not proof that every workspace operation has already stopped.
 3. Ask Microsoft/Databricks whether Managed Services CMK supports private-only vault access or NSP-based access, and how the control-plane route is configured.
 4. Complete authenticated API and browser sign-in from the VM; test classic-cluster back-end Private Link; run public-denial tests from an independent external network; verify the Databricks-managed RG locations.
 5. Secret scan, full Git history review and local commit remain undone. Commit/publishing and cleanup each need separate approval. Cleanup must also address the two peering links and DNS links affecting the existing VM VNet.

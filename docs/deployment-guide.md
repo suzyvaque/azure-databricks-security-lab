@@ -1,5 +1,7 @@
 # Deployment walkthrough and actual execution record
 
+> **Final follow-up completed (2026-10-19 local date):** owner-approved PoC NSP deletion verified. CMK retried with public Disabled / bypass `None` / Deny and one stored control-plane vault IP rule; the new-version update failed with 403 `ForbiddenByConnection` at 2026-10-18 23:54 UTC. Workspace provisioning now `Failed`, prior CMK retained. The earlier successful NSP state below is historical. A stored IP rule does not grant public access with PNA Disabled. No public-enable write, bypass change, automatic recovery or wider cleanup was performed.
+
 ## Initial Phase 1 chronology (historical)
 
 The entries in this table predate Azure deployment and describe the initial read-only phase. They are retained as history; the actual deployment record and latest state follow.

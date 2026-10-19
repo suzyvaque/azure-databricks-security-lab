@@ -1,8 +1,16 @@
 # Security and functional test plan
 
+**Clarified CMK-IP-01 retry, 2026-10-19:** selected networks means PNA Enabled, Deny, bypass None, exactly one control-plane IP rule. After NSP removal, an explicit Enabled write again read back Disabled; configuration gate failed. Do not apply CMK or classify active selected-network connectivity until read-back actually shows Enabled. CMK-IP-02 is a separate Disabled-PNA negative test and cannot substitute for CMK-IP-01. No policy exemption is authorized by the test request.
+
 **Status update 2026-10-18.** This plan was written before deployment. Tests have since been run; actual outcomes are only in [results](results.md). CMK-NSP-03 is complete: phase A failed with `ForbiddenByNsp` after removing the sole inbound perimeter rule; phase B succeeded after the rule was restored. The final workspace is `Succeeded`. Test IDs marked "added" below were created during execution. Do not read this page as a results page. Every test needs an approved deployment, exact local-only configuration snapshot, UTC start/end times and evidence. Do not enable public access, trusted bypass or broader allowlists to make a test pass **unless the owner explicitly approves a labelled control experiment** (CMK-CONFIG-02).
 
 ## Evidence protocol
+
+### Final follow-up: CMK-IP-02 (authorized 2026-10-19 local date)
+
+Remove the PoC NSP and verify its absence. Keep Key Vault public network access `Disabled`, bypass `None`, default Deny; store exactly one firewall IP rule for the previously observed public control-plane address. Create a new key version through the VM PE and reapply CMK, explicitly preserving the one stored rule in the deployment parameters. **Expected:** a public control-plane caller is denied because a firewall IP allowlist does not override public access Disabled. This is a negative test of the exact requested flags, not active selected-network admission. Active selected-network access needs public access Enabled and is outside this follow-up's constraint; prior attempts were also rewritten to Disabled by organization policy. Preserve keys, RBAC, workspace PEs and NCC; do not automatically restore NSP or enable bypass. Record the final workspace state even if it is `Failed`. New raw evidence is stored only in ignored local storage.
+
+Source: [Microsoft Key Vault network security — public access disabled](https://learn.microsoft.com/en-us/azure/key-vault/general/network-security#public-access-disabled-private-endpoint-only). This setting denies public configurations; the trusted-services exception does not apply with bypass `None`, and the NSP exception is absent once the perimeter is removed. A public IP firewall rule is not a Private Endpoint or route into the customer VNet.
 
 For each test preserve: approved configuration manifest/version, relevant ARM properties and provisioning/PE approval states, DNS answers, actual socket peer IP/TLS hostname checks, authentication identity alias, request/correlation IDs, bounded retry window and original errors. Raw JSON, diagnostic logs, actual IPs/IDs and authentication context stay in ignored local evidence. Never log Authorization headers/tokens, key material or secrets. Public results contain sanitized summaries and evidence **aliases**, not raw logs.
 

@@ -2,6 +2,8 @@
 
 ## Executable entry points
 
+- [Test-CmkWithoutPerimeter.ps1](Test-CmkWithoutPerimeter.ps1) is the explicit-confirmation, owner-approved CMK-IP-02 follow-up: checks PoC RG ownership, saves the existing single NSP prefix locally, removes the PoC perimeter, verifies absence, stores that prefix in the Key Vault IP firewall, keeps public access Disabled/bypass None, creates a new key version through the VM PE, and retries CMK while preserving the stored rule. It never enables public access, alters policy, removes NCC, or automatically restores NSP. The stored IP rule is inactive with public access Disabled; this is a negative experiment, not active selected-network access. A failed update can leave the workspace `Failed`. Evidence remains local-only.
+
 All run from the PowerShell Extension terminal. State, parameters and transcripts go to ignored `.local/deploy`.
 
 - [Deploy-Poc.ps1](Deploy-Poc.ps1) deploys [infra/main.bicep](../../infra/main.bicep) into one **new** resource group in `koreacentral`. `-ValidateOnly` compiles only; `-Stage Baseline` deploys; `-Stage Cmk -KeyVersion <version>` applies Managed Services CMK. If `.local/vm/subnet-id.txt` exists (from the VM probe) it also creates a vault endpoint in the VM's subnet. It is idempotent: a rerun reuses the saved run ID.

@@ -1,5 +1,9 @@
 # Engineering journal
 
+## Latest clarification — 2026-10-19
+
+Owner clarified “selected networks” as the portal's **Allow public access from specific virtual networks and IP addresses**, authorizing PNA Enabled / Deny / bypass None with one control-plane IP rule and NSP absent. Retried the setting using the existing IP allowlist script. Both before and after were Disabled / None / Deny / one IP rule / zero VNet rules; stopped with “Stage 2 posture not reached.” Follow-up status at 00:01:21 UTC confirmed workspace `Failed` with previous CMK retained. Policy-state reread still lists `KeyVault_PublicNetwork_Modify` with action `modify` (evaluation timestamps precede this retry). Intended selected-networks CMK is blocked at configuration and was not rerun; the previous Disabled-PNA CMK failure is a separate negative experiment. No policy, bypass, NSP recreation or NCC change made. Exact raw evidence remains ignored/local.
+
 Entries preserve chronological order. Early entries lacked exact UTC times because terminal execution was not established; later cloud operations use timestamps from saved deployment/audit evidence. No times or successful cloud actions are invented.
 
 | Entry | Phase | Intended action / reason | Actual operation | Outcome / errors | Decision / next action |

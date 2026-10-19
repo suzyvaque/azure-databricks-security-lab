@@ -1,6 +1,8 @@
 # Resource inventory
 
-**Baseline and CMK-NSP-03 repeat verified 2026-10-18.** Current target workspace is `Succeeded` with Managed Services CMK applied. Names use the `RUN` alias for the real run identifier. No subscription/tenant IDs, addresses or key versions are published; actual values are in ignored local storage.
+> **Latest verified state (2026-10-19 local date):** owner-approved NSP removal completed; perimeter absence verified. CMK-IP-02 failed at 2026-10-18 23:54 UTC with `ForbiddenByConnection`; target workspace `Failed`, prior CMK version retained. Vault Disabled / None / Deny with one stored IP firewall rule, inactive while PNA Disabled. Other PoC resources and NCC were not removed. The earlier NSP child rows below are historical inventory, not active resources.
+
+**Baseline deployed; latest CMK-IP-02 read-back 2026-10-18 23:54 UTC.** Target workspace `Failed` with prior Managed Services CMK retained. Names use the `RUN` alias for the real run identifier. No subscription/tenant IDs, addresses or key versions are published; actual values are in ignored local storage.
 
 ## Actual deployed inventory (verified in Azure)
 
@@ -13,7 +15,7 @@ All resources are in one new resource group in `koreacentral` unless noted. Vali
 | vnet-…-transit | VNet | koreacentral | /24; auth host/container (delegated, /27) and PE (/26) subnets | Configuration | In RG |
 | nsg-…-ws, nsg-…-auth | NSG | koreacentral | Three outbound rules required by the Databricks network intent policy (SQL 3306, Storage 443, EventHub 9093) | Configuration | In RG |
 | nat-…, pip-…-nat | NAT gateway, public IP | koreacentral | Outbound-only egress for the workspace subnets; unfiltered | Exists | In RG |
-| dbw-… | Databricks workspace | koreacentral | Premium; custom VNet; `enableNoPublicIp=true`; public access Disabled; `NoAzureDatabricksRules`; final provisioning state **`Succeeded`** after CMK-NSP-03 phase B | Configuration; current CMK applied | In RG; managed RG separate; **CMK cannot be disabled once enabled** |
+| dbw-… | Databricks workspace | koreacentral | Premium; custom VNet; `enableNoPublicIp=true`; public access Disabled; `NoAzureDatabricksRules`; current provisioning state **`Failed`** after CMK-IP-02; prior CMK retained | Final negative test denied `ForbiddenByConnection`; attempted key version not applied | In RG; managed RG separate; **CMK cannot be disabled once enabled** |
 | dbw-…-auth | Databricks workspace (auth only) | koreacentral | Same private-only settings; no compute | Configuration | In RG; managed RG separate |
 | pe-…-uiapi | Private endpoint | koreacentral | `databricks_ui_api`, Approved/Succeeded; front-end and back-end roles | Configuration | In RG |
 | pe-…-auth | Private endpoint | koreacentral | `browser_authentication`, Approved/Succeeded | Configuration | In RG |
@@ -22,7 +24,7 @@ All resources are in one new resource group in `koreacentral` unless noted. Vali
 | privatelink.azuredatabricks.net | Private DNS zone | global | Links: workspace VNet and transit VNet; 3 record sets | Configuration | In RG |
 | privatelink.vaultcore.azure.net | Private DNS zone | global | Links: workspace VNet and transit VNet | Configuration | In RG |
 | \<vault\>.privatelink.vaultcore.azure.net | Private DNS zone | global | One link: the **existing VM VNet**; one A record to the VM-side endpoint | Resolves privately from the VM | In RG; link affects existing VNet |
-| kv… | Key Vault | koreacentral | Standard; RBAC; public access Disabled; bypass `None`; default Deny; no Key Vault IP rules; soft delete 7 days; purge protection | Configuration; private access from the VM; control-plane CMK request admitted by Enforced NSP rule, not by a customer PE | Soft-deleted vault remains after RG deletion |
+| kv… | Key Vault | koreacentral | Standard; RBAC; public access Disabled; bypass `None`; default Deny; one stored control-plane IP rule; soft delete 7 days; purge protection; PoC NSP deleted | VM private key creation succeeded; public control-plane CMK denied despite stored IP rule | Soft-deleted vault remains after RG deletion |
 | cmk-managed-services | Key | koreacentral (vault child) | RSA 2048 software key, enabled; created over the private endpoint | Enabled | With vault |
 | law-… | Log Analytics workspace | koreacentral | PerGB2018, 30-day retention | Exists | In RG |
 | audit-to-law | Diagnostic setting | Vault child | AuditEvent to the new workspace | Created; queried for CMK audit events across the experiments | With vault |
