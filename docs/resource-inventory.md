@@ -1,5 +1,25 @@
 # Resource inventory
 
+## Latest verified inventory — 2026-10-19 01:32 UTC
+
+This state supersedes older recovered/Failed/NSP-removed snapshots below.
+
+| Component | Current verified state | Handling |
+| --- | --- | --- |
+| Target workspace | Succeeded; latest service-tag-test key version applied; public access Disabled; Premium, injected VNet/SCC preserved | Retain; do not disable/delete prior key versions |
+| Key Vault | Public Disabled, default Deny, bypass None, zero firewall IP/VNet rules; owner policy-exclusion tag retained | Network control now via NSP native service tag, not classic IP rule |
+| New test NSP | Korea Central isolated service-tag perimeter/profile, one native Inbound AzureDatabricks rule with zero address prefixes | Retained after successful CMK-NSP-TAG-01; scoped cleanup requires approval |
+| Vault NSP association | Enforced, Succeeded | Native service tag gates public-source access; not a customer PE route |
+| LAW NSP association | Learning/Transition, Succeeded, same test profile | Retain for logs; not Enforced |
+| Vault PE connections | Two PoC connections and one Databricks/NCC connection Approved | NCC remains disclosed confounder/cost; account-console deletion requires coordination |
+| CMK versions | Fresh versions created privately for selected-IP and native-tag tests; tag-test version now pinned | Prior versions retained; no key revocation |
+
+Selected-IP CMK-IP-03 succeeded first with NSP absent and exactly one public control-plane IP rule; the rule was then removed for the tag-only test. Existing VM, NSGs, routes and policy assignments were not modified by these tests. Raw names, IDs, address, versions and exclusion-tag values remain ignored/local. Older NSP rows below refer to the earlier removed IP-rule perimeter, not this new native-tag perimeter.
+
+## Historical inventory snapshots
+
+**Latest verification — recovery completed 2026-10-19 00:55:28 UTC:** target workspace provisioning `Succeeded`, same pinned CMK version retained, workspace PNA Disabled. Vault now Enabled from selected networks / Deny / bypass None / one IP / zero VNet rules; owner policy-exclusion tag and all vault ACLs preserved by workspace-only recovery. NSP remains deleted; NCC connection not removed. Older Failed-state/Disabled-vault snapshots below are historical; no new key version was created in this recovery. UI CMK rotation is pending.
+
 > **Latest verified state (2026-10-19 local date):** owner-approved NSP removal completed; perimeter absence verified. CMK-IP-02 failed at 2026-10-18 23:54 UTC with `ForbiddenByConnection`; target workspace `Failed`, prior CMK version retained. Vault Disabled / None / Deny with one stored IP firewall rule, inactive while PNA Disabled. Other PoC resources and NCC were not removed. The earlier NSP child rows below are historical inventory, not active resources.
 
 **Baseline deployed; latest CMK-IP-02 read-back 2026-10-18 23:54 UTC.** Target workspace `Failed` with prior Managed Services CMK retained. Names use the `RUN` alias for the real run identifier. No subscription/tenant IDs, addresses or key versions are published; actual values are in ignored local storage.

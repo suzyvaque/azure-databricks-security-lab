@@ -1,6 +1,15 @@
 # Deployment walkthrough and actual execution record
 
-> **Final follow-up completed (2026-10-19 local date):** owner-approved PoC NSP deletion verified. CMK retried with public Disabled / bypass `None` / Deny and one stored control-plane vault IP rule; the new-version update failed with 403 `ForbiddenByConnection` at 2026-10-18 23:54 UTC. Workspace provisioning now `Failed`, prior CMK retained. The earlier successful NSP state below is historical. A stored IP rule does not grant public access with PNA Disabled. No public-enable write, bypass change, automatic recovery or wider cleanup was performed.
+## Latest completed follow-ups — 2026-10-19
+
+Both tests were explicitly approved by the owner; no additional execution or configuration change is requested.
+
+1. **CMK-IP-03:** after the owner supplied the policy-exclusion tag, verified vault Enabled / Deny / None / one control-plane IP / zero VNet rules and no PoC NSP. [Test-SelectedIpCmk.ps1](../scripts/deploy/Test-SelectedIpCmk.ps1) created a fresh version through the VM PE and updated only the target workspace. Run 01:18:23–01:21:01 UTC succeeded; new version applied, workspace `Succeeded`, vault posture and tags preserved. Audit: three `KeyGet`, one `KeyUnwrap`, all 200 with RBAC and address authorization true, public source matching the allowed IP.
+2. **CMK-NSP-TAG-01:** [Test-NspServiceTagCmk.ps1](../scripts/deploy/Test-NspServiceTagCmk.ps1) created an isolated Korea Central NSP/profile. Native `Inbound` `serviceTags=['AzureDatabricks']` was accepted/read back, provisioning `Succeeded`, zero address prefixes; no prefix expansion. Vault association Enforced; LAW Learning/Transition. Vault changed to Disabled / None / Deny / zero IP and VNet rules, owner tags preserved. Another version was created privately and only the target workspace updated. CMK began 01:29:16.8501Z; script finished 01:31:27.6947Z; deployment/workspace `Succeeded`, new version applied. Audit includes `KeyUnwrap` 200 at 01:30:18 UTC, RBAC true, TrustedService AzureDatabricks, public source; no Get count or address-authorization value is asserted.
+
+**Retained state:** private workspace `Succeeded`, PNA Disabled; vault Disabled / None / Deny / zero IP and VNet rules; Enforced NSP native tag; LAW Learning; owner policy-exclusion tag retained. NCC remains Approved (NCC alone previously failed) and is a confounder. Preserve old key versions for at least 24 hours after rotation; no cleanup, rollback, policy assignment change or additional test is implied. Neither run proves customer PE-only CMK. No tag-removal negative control, external public-denial test or vendor confirmation was obtained. The tag is cloud-wide, not workspace-specific or region-scoped; see [Preview/reference conflict and feed caveats](feasibility.md#native-nsp-service-tag-scope-and-documentation-conflict).
+
+> **Historical follow-up (CMK-IP-02, superseded):** owner-approved PoC NSP deletion verified. CMK retried with public Disabled / bypass `None` / Deny and one stored control-plane vault IP rule; the new-version update failed with 403 `ForbiddenByConnection` at 2026-10-18 23:54 UTC. Workspace provisioning was `Failed`, prior CMK retained. A stored IP rule does not grant public access with PNA Disabled. Later recovery and the two tests above supersede this state.
 
 ## Initial Phase 1 chronology (historical)
 
@@ -43,7 +52,7 @@ These are the Phase 1 steps. The actual deployment record follows the table belo
 
 ### Current work remaining
 
-Authenticated API access and browser sign-in from the VM; classic-cluster/back-end Private Link; external-network public-denial tests; verify Databricks-managed resource group locations; ask Microsoft/Databricks about Managed Services CMK private/NSP support; delete the account-level NCC rule when approved; decide to retain or safely remove the NSP; secret/history review and local commit; approved cleanup. The classic selected-networks test remains blocked by the management-group modify policy. See [results](results.md) and [progress](progress.md).
+Authenticated API access and browser sign-in from the VM; classic-cluster/back-end Private Link; external-network public-denial tests; verify Databricks-managed resource group locations; ask Microsoft/Databricks about Managed Services CMK private/NSP native-tag support and the conflicting references; secret/history review and local commit; separately approved cleanup. Selected-IP and native-tag new-version tests are complete. NCC removal, tag-removal testing or NSP teardown needs a separate decision; retain the current working posture. See [results](results.md) and [progress](progress.md).
 
 ## Concept primer
 
